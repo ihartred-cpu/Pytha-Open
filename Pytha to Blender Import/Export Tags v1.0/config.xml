@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
+  <header>
+    <guid>e15e8bf4-af6a-4276-97ee-25abe9954751</guid>
+    <version>1.0</version>
+    <pytha-version>26.0</pytha-version>
+    <name>Export Tags</name>
+    <description>Writes each part's layer and pen into its name before a glTF export (for the PYTHA glTF Importer in Blender), and removes them again.</description>
+    <licensing>none</licensing>
+  </header>
+  <extension type="function">
+    <entry-point>tag_parts</entry-point>
+    <caption>Tag parts for export</caption>
+    <description>Append {L&lt;layer&gt;:&lt;layer name&gt; P&lt;pen&gt;} to every part name. Export glTF, then run Remove export tags.</description>
+  </extension>
+  <extension type="function">
+    <entry-point>untag_parts</entry-point>
+    <caption>Remove export tags</caption>
+    <description>Remove the {L.. P..} tags from every part name.</description>
+  </extension>
+</plugin>
