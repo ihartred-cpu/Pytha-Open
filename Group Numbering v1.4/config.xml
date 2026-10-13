@@ -6,7 +6,7 @@
     <pytha-version>26.0</pytha-version>
     <name>Group Numbering</name>
     <description>Numbers cabinets (each Cabinet Wizard cabinet, every other top-level group) - bases then uppers, left to right - keeps existing numbers, adds the number to the group name, optional 3D labels.</description>
-    <licensing>Internal Group tool - not for redistribution.</licensing>
+    <licensing>MIT License.</licensing>
   </header>
   <extension type="function">
     <entry-point>numbering_launcher</entry-point>
