@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff srcLang="en-US" version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file original="config.xml">
+    <unit id="e1a2b3c4d5e60001">
+      <segment><source>Group Numbering</source></segment>
+    </unit>
+    <unit id="e1a2b3c4d5e60002">
+      <segment><source>Numbers cabinets (each Cabinet Wizard cabinet, every other top-level group) - bases then uppers, left to right - keeps existing numbers, adds the number to the group name, optional 3D labels.</source></segment>
+    </unit>
+    <unit id="e1a2b3c4d5e60007">
+      <segment><source>Number cabinets left to right, or remove the 3D number labels. Opens a short list of actions.</source></segment>
+    </unit>
+  </file>
+</xliff>
