@@ -161,10 +161,11 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
 /* ================================================================== core (port of pymat_from_textures_shareable.py) */
 const IMG = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp']);
 const KINDS = [
-  ['normal', /normal(gl|dx)?|nrm/i],
+  ['normal', /normal(gl|dx)?|nrm|(^|[_\-. ])norm($|[_\-. ])/i],
   ['ao',     /ambientocclusion|(^|[_\-. ])ao($|[_\-. ])|occlusion/i],
   ['metal',  /metal(ness|lic)?($|[_\-. ])/i],
   ['rough',  /rough(ness)?/i],
+  ['spec',   /specular|(^|[_\-. ])spec($|[_\-. ])|gloss(iness)?|refl(ection)?/i],
   ['height', /displacement|height|disp($|[_\-. ])/i],
   ['bump',   /bump/i],
   ['color',  /base[_\-. ]?colou?r|albedo|diffuse|colou?r|(^|[_\-. ])d($|[_\-. ])/i],
@@ -193,7 +194,7 @@ function scan(paths, plain) {
     let [kind, rx] = classify(stem), key;
     if (kind === null) {
       if (!plain) continue;              // sync mode: ignore previews / stray images
-      kind = 'color'; key = stem;        // vendor swatch: one image = one material
+      kind = 'color'; key = clean(stem).toLowerCase();  // vendor swatch: one image = one material (same key form as its maps)
     } else {
       key = clean(stem.replace(rx, ' ')).toLowerCase();
     }
