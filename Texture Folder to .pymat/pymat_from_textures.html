@@ -163,7 +163,7 @@ const IMG = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp']);
 const KINDS = [
   ['normal', /normal(gl|dx)?|nrm|(^|[_\-. ])norm($|[_\-. ])/i],
   ['ao',     /ambientocclusion|(^|[_\-. ])ao($|[_\-. ])|occlusion/i],
-  ['metal',  /metal(ness|lic)?($|[_\-. ])/i],
+  ['metal',  /(^|[_\-. ])metal(ness|lic)?($|[_\-. ])/i],
   ['rough',  /rough(ness)?/i],
   ['spec',   /specular|(^|[_\-. ])spec($|[_\-. ])|gloss(iness)?|refl(ection)?/i],
   ['height', /displacement|height|disp($|[_\-. ])/i],
