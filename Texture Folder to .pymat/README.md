@@ -29,6 +29,8 @@ Images in the same folder that share a name apart from that word are one set: `o
 
 Images with no map word in their name are handled by mode: *New library from a folder* treats each one as its own colour map (a vendor swatch), while *Add to an existing library* ignores them as previews or strays.
 
+In *New library from a folder* mode, an image with no partner maps is treated as a swatch and keeps its whole file name, so `1234 Some Colour.jpg` stays "1234 Some Colour". Tick **Use full file names** to name every material exactly after its image file.
+
 ## Good to know
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.

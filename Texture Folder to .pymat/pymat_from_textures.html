@@ -125,6 +125,7 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
         </select></label>
       <label class="f" id="stripWrap">Remove from names (optional)
         <input type="text" id="strip" placeholder=" ?540 x 540| ?swatch" size="26" spellcheck="false"></label>
+      <label class="chk" id="fullWrap" title="Name every material exactly after its image file. Off: texture sets with partner maps are named without the map word (oak_basecolor + oak_roughness = Oak)."><input type="checkbox" id="fullNames"> Use full file names</label>
       <label class="chk"><input type="checkbox" id="thumbs" checked> Draw preview thumbnails</label>
     </div>
     <div id="s2msgs"></div>
@@ -231,7 +232,14 @@ function autoName(it, standalone, strip) {
   const base = it.dir ? baseName(it.dir) : '';
   let name;
   if (standalone) {
-    const label = (it.key === it.stem || !it.key) ? it.stem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim() : title(clean(it.key));
+    const fileLabel = it.stem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+    if ($('fullNames').checked) {                         // name exactly after the image file
+      name = fileLabel;
+      if (strip) name = name.replace(strip, '').trim();
+      return cleanName(name);
+    }
+    // a lone image (no roughness/bump/height/... partner) is a swatch: keep its whole file name
+    const label = (it.key === it.stem || !it.key || Object.keys(it.maps).length === 1) ? it.stem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim() : title(clean(it.key));
     if (it.dir && it.group === 1) name = base;
     else if (it.dir) name = base + ' - ' + label;
     else name = label;
@@ -412,7 +420,7 @@ async function refresh() {
   const gen = ++S.gen, standalone = S.mode === 'folder';
   const s1 = [], s2 = [];
   S.lib = null; S.items = []; S.skipped = 0;
-  $('stripWrap').hidden = !standalone;
+  $('stripWrap').hidden = $('fullWrap').hidden = !standalone;
 
   const pymats = S.root.entries.map(e => e.path).filter(p => extOf(p) === '.pymat')
     .sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1));
@@ -693,17 +701,19 @@ $('thumbs').addEventListener('change', () => { if ($('thumbs').checked) queuePre
 let stripTimer;
 $('strip').addEventListener('input', () => {
   clearTimeout(stripTimer);
-  stripTimer = setTimeout(() => {
-    const msgs = [], strip = compileStrip(msgs);
-    setMsgs('s2msgs', msgs);
-    for (const it of S.items) {
-      const fresh = autoName(it, true, strip);
-      if (!it.edited) it.name = fresh;
-      it.autoName = fresh;
-    }
-    renderTable();
-  }, 250);
+  stripTimer = setTimeout(renameAll, 250);
 });
+$('fullNames').addEventListener('change', renameAll);
+function renameAll() {
+  const msgs = [], strip = compileStrip(msgs);
+  setMsgs('s2msgs', msgs);
+  for (const it of S.items) {
+    const fresh = autoName(it, true, strip);
+    if (!it.edited) it.name = fresh;
+    it.autoName = fresh;
+  }
+  renderTable();
+}
 $('rows').addEventListener('input', e => {
   const t = e.target, it = S.items[+t.dataset.i];
   if (!it) return;
