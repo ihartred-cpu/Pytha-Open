@@ -216,6 +216,7 @@ function planMaterials(sets, used, standalone, strip, bumpPref) {
   const order = bumpOrder(bumpPref), items = [];
   let skipped = 0;
   for (const d of [...byDir.keys()].sort()) {
+    if (standalone) attachMaps(byDir.get(d), order);
     const group = byDir.get(d).filter(s => s.maps.color).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     for (const s of group) {
       if (used.has(s.maps.color.toLowerCase())) { skipped++; continue; }
@@ -226,6 +227,35 @@ function planMaterials(sets, used, standalone, strip, bumpPref) {
     }
   }
   return { items, skipped };
+}
+
+/* Folder mode only. Colour images and their maps often have different file names (Bump.jpg next to
+   Cleaf-Alpaca-FC43.jpg), so exact-name pairing finds nothing. In one folder:
+   1. a map whose name matches a colour image (ignoring - _ . and spaces) belongs to that image;
+   2. a colour image that still has no bump/height/roughness shares the folder's unpaired map. */
+function attachMaps(list, order) {
+  const MAPK = ['bump', 'height', 'rough'];
+  const nk = s => s.key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const colours = list.filter(s => s.maps.color);
+  const mapOnly = list.filter(s => !s.maps.color && MAPK.some(k => s.maps[k]));
+  const claimed = new Set();
+  for (const c of colours) {
+    for (const m of mapOnly) {
+      if (nk(m) !== nk(c)) continue;
+      claimed.add(m);
+      for (const k of MAPK) if (m.maps[k] && !c.maps[k]) c.maps[k] = m.maps[k];
+    }
+  }
+  const spare = mapOnly.filter(m => !claimed.has(m));
+  for (const c of colours) {
+    if (MAPK.some(k => c.maps[k])) continue;
+    for (const k of order) {
+      const m = spare.find(x => x.maps[k]);
+      if (!m) continue;
+      for (const kk of MAPK) if (m.maps[kk] && !c.maps[kk]) c.maps[kk] = m.maps[kk];
+      break;
+    }
+  }
 }
 
 function autoName(it, standalone, strip) {

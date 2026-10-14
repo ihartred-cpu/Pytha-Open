@@ -31,6 +31,13 @@ Images with no map word in their name are handled by mode: *New library from a f
 
 In *New library from a folder* mode, an image with no partner maps is treated as a swatch and keeps its whole file name, so `1234 Some Colour.jpg` stays "1234 Some Colour". Tick **Use full file names** to name every material exactly after its image file.
 
+**Shared bump maps (New library from a folder).** Vendors often ship one `Bump.jpg` per product that every finish uses, so the names never match. In this mode the page pairs maps like this, folder by folder:
+
+1. A bump, height or roughness image whose name matches a colour image (ignoring `-`, `_`, `.` and spaces) goes with that image, e.g. `alter-lm98.jpg` and `alter-lm98_Height.jpg`.
+2. Any colour image still without one uses the folder's unpaired bump (or height, or roughness) image. Put each product in its own folder so every finish shares that product's bump.
+
+You can still change or clear the bump for any material in the list. *Add to an existing library* mode does not share bumps.
+
 ## Good to know
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.
