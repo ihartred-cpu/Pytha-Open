@@ -38,6 +38,8 @@ In *New library from a folder* mode, an image with no partner maps is treated as
 
 You can still change or clear the bump for any material in the list. *Add to an existing library* mode does not share bumps.
 
+**Rotate all images 90° clockwise (New library from a folder, Chrome or Edge).** Tick this to turn every texture a quarter turn, for example to make portrait sheets landscape. The page saves rotated copies of the images used by the selected materials into a new `FolderName (rotated)` folder inside the folder you chose, with the `.pymat` next to them, and links the materials to the copies. Your originals are not changed. Any EXIF rotation in a photo is applied first. JPEGs stay JPEGs; PNG, TIF and BMP images are saved as PNG. Rotating very large images takes a while and needs plenty of memory, and a `(rotated)` folder is never scanned as source textures if you pick the folder again.
+
 ## Good to know
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.

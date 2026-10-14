@@ -126,6 +126,7 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
       <label class="f" id="stripWrap">Remove from names (optional)
         <input type="text" id="strip" placeholder=" ?540 x 540| ?swatch" size="26" spellcheck="false"></label>
       <label class="chk" id="fullWrap" title="Name every material exactly after its image file. Off: texture sets with partner maps are named without the map word (oak_basecolor + oak_roughness = Oak)."><input type="checkbox" id="fullNames"> Use full file names</label>
+      <label class="chk" id="rotWrap" title="Saves rotated copies of the images used by the selected materials into a new '(rotated)' folder, with the .pymat next to them. Your originals are not changed."><input type="checkbox" id="rotate"> Rotate all images 90&deg; clockwise<span id="rotNote" class="note"></span></label>
       <label class="chk"><input type="checkbox" id="thumbs" checked> Draw preview thumbnails</label>
     </div>
     <div id="s2msgs"></div>
@@ -412,9 +413,10 @@ function setMsgs(id, list) {
 }
 
 /* ---------- loading a folder */
+const ROTATED_DIR = /\(rotated( \d+)?\)$/i;   // output of the rotate option; never scanned as source textures
 async function walk(dir, prefix, out) {
   for await (const [name, h] of dir.entries()) {
-    if (h.kind === 'directory') { if (!name.startsWith('.')) await walk(h, prefix + name + '/', out); }
+    if (h.kind === 'directory') { if (!name.startsWith('.') && !ROTATED_DIR.test(name)) await walk(h, prefix + name + '/', out); }
     else out.push({ path: prefix + name, get: () => h.getFile() });
   }
 }
@@ -430,7 +432,7 @@ function loadFileList(files) {
     const parts = (f.webkitRelativePath || f.name).split('/');
     name = parts[0];
     const rel = parts.slice(1);
-    if (!rel.length || rel.slice(0, -1).some(d => d.startsWith('.'))) continue;
+    if (!rel.length || rel.slice(0, -1).some(d => d.startsWith('.') || ROTATED_DIR.test(d))) continue;
     entries.push({ path: rel.join('/'), get: async () => f });
   }
   setRoot({ name, handle: null, entries });
@@ -450,7 +452,10 @@ async function refresh() {
   const gen = ++S.gen, standalone = S.mode === 'folder';
   const s1 = [], s2 = [];
   S.lib = null; S.items = []; S.skipped = 0;
-  $('stripWrap').hidden = $('fullWrap').hidden = !standalone;
+  $('stripWrap').hidden = $('fullWrap').hidden = $('rotWrap').hidden = !standalone;
+  const canRot = !!S.root.handle;
+  $('rotate').disabled = !canRot; if (!canRot) $('rotate').checked = false;
+  $('rotNote').textContent = canRot ? '' : ' (needs Chrome or Edge)';
 
   const pymats = S.root.entries.map(e => e.path).filter(p => extOf(p) === '.pymat')
     .sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1));
@@ -583,6 +588,7 @@ function updateBar() {
 function destName() {
   if (!S.root) return '';
   if (S.mode === 'sync') return S.pymatPath ? uniqueFile(S.texDir, stemOf(baseName(S.pymatPath)) + '_NEW', '.pymat') : '';
+  if ($('rotate').checked && S.root.handle) return `${S.root.name} (rotated)/${S.root.name}.pymat`;
   return uniqueFile('', S.root.name, '.pymat');
 }
 function uniqueFile(dir, base, ext) {
@@ -623,10 +629,30 @@ async function create() {
   S.busy = true; updateBar(); $('s3msgs').innerHTML = '';
   try {
     const withThumbs = $('thumbs').checked, standalone = S.mode === 'folder';
+    const rotate = standalone && $('rotate').checked && !!S.root.handle;
+    let outDir = '', nRot = 0; const relMap = new Map(), rotPrev = new Map();
+    if (rotate) {
+      if (!(await canWrite())) throw new Error('Permission to save into the folder was not given.');
+      outDir = await freeRotatedName();
+      const colours = new Set(sel.map(it => it.maps.color));
+      const need = [...new Set(sel.flatMap(it => [it.maps.color, it.bumpKind ? it.maps[it.bumpKind] : null]).filter(Boolean))];
+      nRot = need.length;
+      for (let i = 0; i < need.length; i++) {
+        const rel = need[i];
+        $('status').innerHTML = `Rotating images… ${i + 1} / ${need.length} <progress max="${need.length}" value="${i}"></progress>`;
+        const e = S.root.entries.find(x => x.path === rel);
+        const { blob, ext } = await rotateCW(await e.get(), extOf(rel));
+        const outRel = ext === extOf(rel) ? rel : rel.slice(0, rel.length - extOf(rel).length) + ext;
+        await writeAt(outDir + '/' + dirName(outRel), baseName(outRel), blob);
+        relMap.set(rel, outRel);
+        if (withThumbs && colours.has(rel)) rotPrev.set(rel, await renderPreview(blob));
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
     const previews = [];
     for (let i = 0; i < sel.length; i++) {
       $('status').innerHTML = `Drawing thumbnails… ${i + 1} / ${sel.length} <progress max="${sel.length}" value="${i}"></progress>`;
-      previews.push(withThumbs ? await ensurePreview(sel[i]) : null);
+      previews.push(rotate ? (rotPrev.get(sel[i].maps.color) || null) : (withThumbs ? await ensurePreview(sel[i]) : null));
       if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
     }
     $('status').textContent = 'Writing file…';
@@ -638,9 +664,10 @@ async function create() {
       let name = cleanName(it.name), n0 = name, k = 2;
       while (names.has(name)) name = `${n0} (${k++})`;
       names.add(name);
-      const caid = nxt++; assets.push([caid, it.maps.color]);
+      const link = rel => rotate ? relMap.get(rel) : rel;
+      const caid = nxt++; assets.push([caid, link(it.maps.color)]);
       let baid = null;
-      if (it.bumpKind) { baid = nxt++; assets.push([baid, it.maps[it.bumpKind]]); }
+      if (it.bumpKind) { baid = nxt++; assets.push([baid, link(it.maps[it.bumpKind])]); }
       mats.push(materialXml(name, nxt++, caid, baid, previews[i]));
     });
     const matText = mats.map(m => m.join('\n')).join('\n');
@@ -650,7 +677,8 @@ async function create() {
         .replace('  <materials>\n', () => '  <materials>\n' + matText + '\n')
         .replace('  <assets>\n', () => '  <assets>\n' + assetsXml(assets))
         .replace(/\n/g, '\r\n');
-      fileName = destName();
+      fileName = rotate ? S.root.name + '.pymat' : destName();
+      if (rotate) dir = outDir;
     } else {
       out = S.lib.xml
         .replace('  </materials>', () => matText + '\n  </materials>')
@@ -662,17 +690,52 @@ async function create() {
     const bytes = (!standalone && S.lib.bom) ? Uint8Array.from([0xEF, 0xBB, 0xBF, ...enc]) : enc;
     const saved = await saveFile(dir, fileName, bytes);
     const where = (dir ? dir + '/' : '') + fileName;
+    const rotNote = rotate ? ` ${nRot} rotated image${nRot === 1 ? '' : 's'} saved alongside it; your originals were not changed.` : '';
     const steps = standalone
       ? `Copy the <code>.pymat</code> into PYTHA's material folder <b>together with its textures</b> (links are relative), or open it from where it is.`
       : `Next: back up your original library, close PYTHA, then rename <code>${esc(fileName)}</code> over it. Keep it next to its textures (links are relative).`;
     setMsgs('s3msgs', [{ t: 'ok', html: `<b>${sel.length} material${sel.length === 1 ? '' : 's'} added.</b> ` +
-      (saved ? `Saved <code>${esc(where)}</code> inside <b>${esc(S.root.name)}</b>.` : `Downloaded <code>${esc(fileName)}</code> &mdash; move it ${standalone ? 'into' : 'next to your original library in'} <b>${esc(S.root.name)}</b>.`) +
+      (saved ? `Saved <code>${esc(where)}</code> inside <b>${esc(S.root.name)}</b>.${rotNote}` : `Downloaded <code>${esc(fileName)}</code> &mdash; move it ${standalone ? 'into' : 'next to your original library in'} <b>${esc(S.root.name)}</b>.`) +
       `<br>${steps}` }]);
     $('s3msgs').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
     console.error(e);
     setMsgs('s3msgs', [{ t: 'err', html: `Something went wrong: ${esc(e.message || e)}` }]);
   } finally { S.busy = false; updateBar(); }
+}
+
+/* rotate 90 degrees clockwise; createImageBitmap applies any EXIF orientation first */
+async function rotateCW(file, ext) {
+  const bmp = await createImageBitmap(file);
+  const w = bmp.height, h = bmp.width;
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.translate(w, 0); g.rotate(Math.PI / 2); g.drawImage(bmp, 0, 0);
+  bmp.close && bmp.close();
+  const jpeg = ext === '.jpg' || ext === '.jpeg';
+  const blob = await new Promise(res => c.toBlob(res, jpeg ? 'image/jpeg' : 'image/png', 0.95));
+  c.width = c.height = 0;
+  if (!blob) throw new Error('An image was too large for this browser to rotate.');
+  return { blob, ext: jpeg ? ext : '.png' };      // jpg stays jpg; png, tif and bmp are saved as png
+}
+async function canWrite() {
+  const h = S.root.handle;
+  if (!h) return false;
+  if (!h.queryPermission) return true;
+  return (await h.queryPermission({ mode: 'readwrite' })) === 'granted' || (await h.requestPermission({ mode: 'readwrite' })) === 'granted';
+}
+async function writeAt(dirPath, name, data) {
+  let d = S.root.handle;
+  for (const seg of dirPath.split('/').filter(Boolean)) d = await d.getDirectoryHandle(seg, { create: true });
+  const fh = await d.getFileHandle(name, { create: true });
+  const w = await fh.createWritable(); await w.write(data); await w.close();
+}
+async function freeRotatedName() {
+  for (let i = 1; i < 100; i++) {
+    const n = `${S.root.name} (rotated${i > 1 ? ' ' + i : ''})`;
+    try { await S.root.handle.getDirectoryHandle(n); } catch (e) { return n; }   // not found = free
+  }
+  throw new Error('Too many rotated folders already exist.');
 }
 
 async function saveFile(dir, fileName, bytes) {
@@ -727,6 +790,7 @@ drop.addEventListener('drop', async e => {
 document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => { S.mode = r.value; $('s3msgs').innerHTML = ''; refresh(); }));
 $('pymatSel').addEventListener('change', e => { S.pymatPath = e.target.value; refresh(); });
 $('bumpPref').addEventListener('change', refresh);
+$('rotate').addEventListener('change', updateBar);
 $('thumbs').addEventListener('change', () => { if ($('thumbs').checked) queuePreviews(S.gen); });
 let stripTimer;
 $('strip').addEventListener('input', () => {
