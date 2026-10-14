@@ -40,7 +40,21 @@ You can still change or clear the bump for any material in the list. *Add to an 
 
 **Rotate all images 90° clockwise (New library from a folder, Chrome or Edge).** Tick this to turn every texture a quarter turn, for example to make portrait sheets landscape. The page saves rotated copies of the images used by the selected materials into a new `FolderName (rotated)` folder inside the folder you chose, with the `.pymat` next to them, and links the materials to the copies. Your originals are not changed. Any EXIF rotation in a photo is applied first. JPEGs stay JPEGs; PNG, TIF and BMP images are saved as PNG. Rotating very large images takes a while and needs plenty of memory, and a `(rotated)` folder is never scanned as source textures if you pick the folder again.
 
+## Bump strength
+**Bump strength** sets PYTHA's bump angle for every material that has a bump, height or roughness map. It starts at 80, close to PYTHA's own materials (about 55 to 90). Very low values look flat. It is remembered with your other settings.
+
+## Material look (shine)
+The **Material look** menu sets how shiny every new material is in PYTHA:
+- **Leave as PYTHA default** writes nothing, as before.
+- **Matte**, **Satin laminate** and **Gloss** are ready-made starting points.
+- **Custom** shows three sliders: **Matte**, **Specularity** and **Highlight** (the strength of the Specular Highlight curve).
+
+It applies to every material in the run and is remembered with your other settings. These map to the `diffuse`, `reflective` and `gloss-curve` values in the `.pymat` (worked out from PYTHA's own material files). Check one result in PYTHA's material editor the first time.
+
 ## Good to know
+- A folder called `textures` (or `maps`, `images`, ...) is named after the folder above it.
+- An unlabelled image next to a real colour map (a preview render such as `Metal009.png`) is listed but starts unticked.
+- Your settings (bump slot, name cleanup, full file names, rotate, thumbnails) are remembered in this browser for next time. **Reset settings** puts them back to the starting values.
 - **Cancel** (or press Esc) stops a run in progress. It takes effect between images, so a very large image finishes first. Nothing is saved, and a half-made `(rotated)` folder is removed again. Your originals are never touched.
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.

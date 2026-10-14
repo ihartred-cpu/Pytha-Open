@@ -73,6 +73,9 @@ td select{width:100%;max-width:280px}
 td.name input.dup{border-color:var(--warn)}
 td .fn{font-size:12.5px;color:var(--muted);word-break:break-all}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px;z-index:5}
+.look{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:12px}
+.look .f input[type=range]{width:150px}
+.look .val{font-variant-numeric:tabular-nums;color:var(--muted,inherit);margin-left:6px;font-weight:400}
 .bar .acts{display:flex;gap:10px;align-items:center}
 .bar .in{max-width:980px;margin:0 auto;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 #status{font-size:14px}
@@ -129,6 +132,27 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
       <label class="chk" id="fullWrap" title="Name every material exactly after its image file. Off: texture sets with partner maps are named without the map word (oak_basecolor + oak_roughness = Oak)."><input type="checkbox" id="fullNames"> Use full file names</label>
       <label class="chk" id="rotWrap" title="Saves rotated copies of the images used by the selected materials into a new '(rotated)' folder, with the .pymat next to them. Your originals are not changed."><input type="checkbox" id="rotate"> Rotate all images 90&deg; clockwise<span id="rotNote" class="note"></span></label>
       <label class="chk"><input type="checkbox" id="thumbs" checked> Draw preview thumbnails</label>
+      <button class="btn small" id="resetPrefs" type="button" title="Settings above are remembered in this browser. This puts them back to the starting values.">Reset settings</button>
+    </div>
+    <div class="look">
+      <label class="f" title="How shiny the new materials are in PYTHA. Applied to every material in this run.">Material look
+        <select id="look">
+          <option value="none">Leave as PYTHA default (write nothing)</option>
+          <option value="matte">Matte (like PYTHA's wood materials)</option>
+          <option value="satin">Satin laminate</option>
+          <option value="gloss">Gloss</option>
+          <option value="custom">Custom&hellip;</option>
+        </select></label>
+      <label class="f" title="PYTHA's bump map strength (the bump angle). PYTHA's own materials use roughly 55 to 90. Low values look flat.">Bump strength<span class="val" id="bumpAngleV"></span>
+        <input type="range" id="bumpAngle" min="0" max="90" step="1" value="80"></label>
+      <span id="lookCustom" hidden class="look">
+        <label class="f" title="PYTHA's Matte slider (diffuse reflection)">Matte<span class="val" id="lookMatteV"></span>
+          <input type="range" id="lookMatte" min="0" max="1" step="0.01" value="0.8"></label>
+        <label class="f" title="PYTHA's Specularity slider: how much mirror-like reflection there is">Specularity<span class="val" id="lookSpecV"></span>
+          <input type="range" id="lookSpec" min="0" max="0.5" step="0.005" value="0"></label>
+        <label class="f" title="Strength of the Specular Highlight curve: how bright and wide the soft highlight is">Highlight<span class="val" id="lookHiV"></span>
+          <input type="range" id="lookHi" min="0" max="1" step="0.01" value="0.4"></label>
+      </span>
     </div>
     <div id="s2msgs"></div>
     <div class="tablewrap" id="tablewrap" hidden>
@@ -189,6 +213,12 @@ const clean = s => s.replace(/[_\-. ]+/g, ' ').replace(/\s+/g, ' ').trim();
 const title = s => s.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
 
 /* paths: array of paths relative to the texture folder -> Map "dir|key" -> {dir,key,maps,stem} */
+const GENERIC_DIR = /^(textures?|tex|maps?|images?|imgs?|jpe?gs?|pngs?|source|materials?)$/i;
+function niceDir(d) {            // a folder just called "textures" is named after the folder above it
+  const parts = d.split('/').filter(Boolean);
+  while (parts.length > 1 && GENERIC_DIR.test(parts[parts.length - 1])) parts.pop();
+  return parts.length ? parts[parts.length - 1] : '';
+}
 function scan(paths, plain) {
   const sets = new Map();
   for (const rel of paths) {
@@ -196,15 +226,17 @@ function scan(paths, plain) {
     if (!IMG.has(extOf(f))) continue;
     const stem = stemOf(f);
     let [kind, rx] = classify(stem), key;
+    let swatch = false;
     if (kind === null) {
-      if (!plain) continue;              // sync mode: ignore previews / stray images
+      if (!plain) continue;
+      swatch = true;              // sync mode: ignore previews / stray images
       kind = 'color'; key = clean(stem).toLowerCase();  // vendor swatch: one image = one material (same key form as its maps)
     } else {
       key = clean(stem.replace(rx, ' ')).toLowerCase();
     }
     const d = dirName(rel), id = d + '|' + key;
     let s = sets.get(id);
-    if (!s) { s = { dir: d, key, maps: {}, stem }; sets.set(id, s); }
+    if (!s) { s = { dir: d, key, maps: {}, stem, swatch }; sets.set(id, s); }
     s.maps[kind] = rel;
     if (kind === 'color') s.stem = stem;
   }
@@ -224,9 +256,13 @@ function planMaterials(sets, used, standalone, strip, bumpPref) {
   for (const d of [...byDir.keys()].sort()) {
     if (standalone) attachMaps(byDir.get(d), order);
     const group = byDir.get(d).filter(s => s.maps.color).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    // an unlabelled image sitting next to a real colour map is almost always a preview render, so it starts unticked
+    const hasReal = group.some(s => !s.swatch);
+    const isPrev = s => hasReal && s.swatch;
+    const gcount = group.filter(s => !isPrev(s)).length;
     for (const s of group) {
       if (used.has(s.maps.color.toLowerCase())) { skipped++; continue; }
-      const it = { dir: d, key: s.key, stem: s.stem, maps: s.maps, group: group.length, include: true, edited: false };
+      const it = { dir: d, key: s.key, stem: s.stem, maps: s.maps, group: isPrev(s) ? group.length : gcount, include: !isPrev(s), edited: false, preview: isPrev(s) };
       it.bumpKind = order.find(k => s.maps[k]) || null;
       it.name = it.autoName = autoName(it, standalone, strip);
       items.push(it);
@@ -265,7 +301,7 @@ function attachMaps(list, order) {
 }
 
 function autoName(it, standalone, strip) {
-  const base = it.dir ? baseName(it.dir) : '';
+  const base = it.dir ? niceDir(it.dir) : '';
   let name;
   if (standalone) {
     const fileLabel = it.stem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
@@ -298,7 +334,14 @@ function materialXml(name, mid, colorAid, bumpAid, previewB64) {
   a('        <a:color-srgb id="1000001" t="c">');
   for (let i = 0; i < 3; i++) a('          <a:f r="0" t="d">0.5</a:f>');
   a('        </a:color-srgb>');
-  a('        <a:diffuse id="1000002" t="d">0.80000000000000004</a:diffuse>');
+  const lk = lookValues();
+  a(`        <a:diffuse id="1000002" t="d">${lk ? lk.matte : '0.80000000000000004'}</a:diffuse>`);
+  if (lk) {
+    a(`        <a:reflective id="1000003" t="d">${lk.spec}</a:reflective>`);
+    a('        <a:gloss-curve id="1000007" t="c">');
+    for (const v of lk.curve) a(`          <a:f r="0" t="d">${v}</a:f>`);
+    a('        </a:gloss-curve>');
+  }
   a('        <a:texture-size id="1000009" t="c">');
   a('          <a:f r="0" t="d" i="4">0</a:f>'); a('          <a:f r="0" t="d" i="4">0</a:f>');
   a('        </a:texture-size>');
@@ -309,7 +352,7 @@ function materialXml(name, mid, colorAid, bumpAid, previewB64) {
     a('        <a:bumpmap-asset id="1000012" t="c">');
     a('          <a:f r="0" t="i" i="1">33</a:f>'); a(`          <a:f r="0" t="i" i="1">${bumpAid}</a:f>`); a('          <a:f r="0" t="i" i="1">0</a:f>');
     a('        </a:bumpmap-asset>');
-    a('        <a:bumpmap-angle id="1000013" t="d">0.10000000000000001</a:bumpmap-angle>');
+    a(`        <a:bumpmap-angle id="1000013" t="d">${r4(+$('bumpAngle').value)}</a:bumpmap-angle>`);
   }
   for (const aid of ['1000014', '1000015']) {
     a(`        <a:attribute id="${aid}" t="c">`);
@@ -322,6 +365,30 @@ function materialXml(name, mid, colorAid, bumpAid, previewB64) {
   }
   a('    </material>');
   return L;
+}
+
+/* material look: PYTHA stores Matte as <diffuse>, Specularity as <reflective> and the highlight shape as a 13-point <gloss-curve> */
+const LOOKS = {
+  matte: { matte: 0.8, spec: 0,    hi: 0.4 },
+  satin: { matte: 0.8, spec: 0.04, hi: 0.5 },
+  gloss: { matte: 0.8, spec: 0.15, hi: 1 },
+};
+const CURVE = [1, 0.95, 0.85, 0.7, 0.4, 0.2, 0.1, 0.05, 0, 0, 0, 0, 0];   // PYTHA's own default highlight shape
+const r4 = n => String(Math.round(n * 10000) / 10000);
+function lookValues() {
+  const m = $('look').value;
+  if (m === 'none') return null;
+  const v = m === 'custom' ? { matte: +$('lookMatte').value, spec: +$('lookSpec').value, hi: +$('lookHi').value } : LOOKS[m];
+  return { matte: r4(v.matte), spec: r4(v.spec), curve: CURVE.map(c => r4(c * v.hi)) };
+}
+function syncLook(fromPreset) {
+  const m = $('look').value;
+  if (fromPreset && LOOKS[m]) { $('lookMatte').value = LOOKS[m].matte; $('lookSpec').value = LOOKS[m].spec; $('lookHi').value = LOOKS[m].hi; }
+  $('lookCustom').hidden = m !== 'custom';
+  $('lookMatteV').textContent = (+$('lookMatte').value).toFixed(2);
+  $('lookSpecV').textContent = (+$('lookSpec').value).toFixed(3);
+  $('lookHiV').textContent = (+$('lookHi').value).toFixed(2);
+  $('bumpAngleV').textContent = ' ' + $('bumpAngle').value + '\u00b0';
 }
 
 const assetsXml = list => list.map(([aid, rel]) =>
@@ -852,6 +919,36 @@ $('rows').addEventListener('change', e => {
 });
 $('all').addEventListener('change', e => { S.items.forEach(i => i.include = e.target.checked); renderTable(); });
 $('create').addEventListener('click', create);
+
+/* ---------- remembered settings (this browser only; page works the same if storage is blocked) */
+const PREF_KEY = 'pymatFromTextures.settings';
+const PREFS = { bumpPref: 'auto', strip: '', fullNames: false, rotate: false, thumbs: true, look: 'none', lookMatte: 0.8, lookSpec: 0, lookHi: 0.4, bumpAngle: 80 };
+function savePrefs() {
+  const o = {};
+  for (const k in PREFS) o[k] = $(k).type === 'checkbox' ? $(k).checked : $(k).value;
+  try { localStorage.setItem(PREF_KEY, JSON.stringify(o)); } catch (e) {}
+}
+function applyPrefs(o) {
+  for (const k in PREFS) {
+    if (!(k in o)) continue;
+    if ($(k).type === 'checkbox') $(k).checked = !!o[k];
+    else if ($(k).tagName !== 'SELECT' || [...$(k).options].some(x => x.value === o[k])) $(k).value = String(o[k]);
+  }
+}
+try { applyPrefs(JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); } catch (e) {}
+syncLook(false);
+for (const k in PREFS) $(k).addEventListener($(k).type === 'text' || $(k).type === 'range' ? 'input' : 'change', savePrefs);
+$('look').addEventListener('change', () => { syncLook(true); savePrefs(); });
+$('bumpAngle').addEventListener('input', () => syncLook(false));
+for (const k of ['lookMatte', 'lookSpec', 'lookHi']) $(k).addEventListener('input', () => {
+  if ($('look').value !== 'custom') { $('look').value = 'custom'; }
+  syncLook(false); savePrefs();
+});
+$('resetPrefs').addEventListener('click', () => {
+  applyPrefs(PREFS); syncLook(false); savePrefs();
+  if (S.items.length) { renameAll(); refresh(); } else updateBar();
+  if ($('thumbs').checked) queuePreviews(S.gen);
+});
 </script>
 </body>
 </html>
