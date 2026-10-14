@@ -30,7 +30,7 @@
 #
 #  CHANGELOG
 #  1.0.0 - first version (2026-10-06), tested against a PYTHA V26 GLB export
-#          of a BCW Cabinet Wizard kitchen.
+#          of a BCW Kitchen Wizard kitchen.
 # ============================================================
 
 bl_info = {

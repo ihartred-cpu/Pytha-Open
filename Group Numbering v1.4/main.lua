@@ -8,7 +8,7 @@
 -- name ("Base" -> "Base #3") and, optionally, shown as an upright 3D label above the group.
 --
 -- What is a "cabinet" (decision 1, changed in 1.1):
---   * inside a Cabinet Wizard kitchen (a top-level group carrying the wizard's element history), every
+--   * inside a Kitchen Wizard kitchen (a top-level group carrying the wizard's element history), every
 --     cabinet group of the kitchen - not the kitchen as a whole, not its Benchtop / Kickboard groups;
 --   * any other top-level group counts as one item.
 -- Order (decision 2): all bases (wizard base and high cabinets + every other top-level group) left to right,
@@ -27,7 +27,7 @@ local LABEL_GROUP_NAME = "Group Numbers"		--all labels live in this one top-leve
 local LABEL_PREFIX = "Group No. "
 local NAME_SEPARATOR = " #"					--"Base" -> "Base #3"
 local WIZARD_HISTORY_KEYS = {"wizard_history", "Group_cabinet_wizard_history"}	--KWGUID build / standalone build
-local WALL_ROW = 0x2						--Cabinet Wizard row code for wall cabinets
+local WALL_ROW = 0x2						--Kitchen Wizard row code for wall cabinets
 
 local DEFAULTS = {
 	start = 1,
@@ -361,7 +361,7 @@ function number_groups()
 		if it.tier == 2 then uppers = uppers + 1 else bases = bases + 1 end
 	end
 	local msg = {pyloc "Group Numbering", ""}
-	table.insert(msg, #items .. " cabinet(s)/group(s): " .. bases .. " base / other, " .. uppers .. " upper" .. (kitchens > 0 and (", from " .. kitchens .. " Cabinet Wizard kitchen(s)") or "") .. ".")
+	table.insert(msg, #items .. " cabinet(s)/group(s): " .. bases .. " base / other, " .. uppers .. " upper" .. (kitchens > 0 and (", from " .. kitchens .. " Kitchen Wizard kitchen(s)") or "") .. ".")
 	if renumber_all then
 		table.insert(msg, "Renumbered everything from " .. s.start .. ".")
 	else
@@ -376,7 +376,7 @@ function number_groups()
 	end
 	if removed > 0 then table.insert(msg, "Old labels replaced.") end
 	table.insert(msg, "")
-	table.insert(msg, "A Cabinet Wizard Edit rebuilds the kitchen: its cabinets lose their numbers and get new ones on the next run.")
+	table.insert(msg, "A Kitchen Wizard Edit rebuilds the kitchen: its cabinets lose their numbers and get new ones on the next run.")
 	pyui.alert(table.concat(msg, "\n"))
 end
 

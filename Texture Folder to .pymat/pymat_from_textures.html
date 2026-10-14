@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pymat from Textures</title>
+<style>
+:root{
+  --bg:#f6f4ef; --card:#ffffff; --ink:#1d1b17; --muted:#6b665c; --line:#e1ddd2;
+  --accent:#9a5b1e; --accent-ink:#ffffff; --accent-soft:#f3e6d6;
+  --ok:#2f6b3a; --ok-bg:#e3f1e5; --warn:#7a5200; --warn-bg:#fff4d6; --err:#a32a1f; --err-bg:#fbe4e0;
+  --thumb:#ece8de; --field:#fbfaf6;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#17150f; --card:#211e17; --ink:#efebe0; --muted:#a39d8e; --line:#38342a;
+    --accent:#d98b3e; --accent-ink:#1a1206; --accent-soft:#3a2b17;
+    --ok:#7fc58b; --ok-bg:#1e3323; --warn:#e5b64a; --warn-bg:#352b10; --err:#f08a7e; --err-bg:#3a1c18;
+    --thumb:#2b271e; --field:#1a1812;
+  }
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:980px;margin:0 auto;padding:0 16px}
+header.wrap{padding-top:28px;padding-bottom:8px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
+.lede{margin:0;color:var(--muted);max-width:62ch}
+main{padding-bottom:110px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:16px}
+h2{font-size:17px;margin:0 0 12px;display:flex;align-items:center;gap:10px}
+h2 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:700}
+h3{font-size:14px;margin:18px 0 8px}
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:640px){.modes{grid-template-columns:1fr}}
+.mode{display:block;border:2px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;position:relative}
+.mode input{position:absolute;opacity:0}
+.mode b{display:block}
+.mode span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
+.mode:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
+.mode:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+.drop{border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;transition:background .15s,border-color .15s}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop p{margin:8px 0 0;color:var(--muted);font-size:13.5px}
+.btn{font:inherit;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:9px 16px;border-radius:8px;cursor:pointer}
+.btn:hover{border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.primary:hover{filter:brightness(1.07)}
+.btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.btn.small{padding:4px 10px;font-size:13px;font-weight:500}
+.note{color:var(--muted);font-size:13.5px}
+.msg{border-radius:8px;padding:10px 12px;margin-top:12px;font-size:14px}
+.msg.warn{background:var(--warn-bg);color:var(--warn)}
+.msg.err{background:var(--err-bg);color:var(--err)}
+.msg.ok{background:var(--ok-bg);color:var(--ok)}
+.msg ul{margin:6px 0 0;padding-left:20px}
+.msg code,.note code{font:13px ui-monospace,Consolas,monospace}
+.row{display:flex;gap:16px;flex-wrap:wrap;align-items:end}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted)}
+select,input[type=text]{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
+select:focus,input[type=text]:focus{outline:2px solid var(--accent);outline-offset:0}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px}
+.tablewrap{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:62vh}
+table{border-collapse:collapse;width:100%;min-width:640px}
+th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
+th{position:sticky;top:0;background:var(--card);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);z-index:1}
+tr:last-child td{border-bottom:0}
+tr.off td{opacity:.45}
+td.thumb{width:62px}
+.th{width:48px;height:48px;border-radius:6px;background:var(--thumb);display:block;object-fit:cover}
+td.name input{width:100%}
+td select{width:100%;max-width:280px}
+td.name input.dup{border-color:var(--warn)}
+td .fn{font-size:12.5px;color:var(--muted);word-break:break-all}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px;z-index:5}
+.bar .in{max-width:980px;margin:0 auto;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+#status{font-size:14px}
+progress{width:140px;height:8px;vertical-align:middle}
+footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<header class="wrap">
+  <h1>pymat from Textures</h1>
+  <p class="lede">Turn a folder of texture images into a PYTHA material library (<code>.pymat</code>), with colour, roughness/bump wiring and preview thumbnails. Everything runs in this page &mdash; nothing is uploaded, and your textures are never changed.</p>
+</header>
+
+<main class="wrap">
+  <section class="card" id="s1">
+    <h2><span class="n">1</span> Choose what to make</h2>
+    <div class="modes" role="radiogroup">
+      <label class="mode"><input type="radio" name="mode" value="sync" checked>
+        <b>Add to an existing library</b>
+        <span>Finds textures your <code>.pymat</code> doesn't use yet and adds them. Your original is left alone; a copy ending in <code>_NEW</code> is made.</span></label>
+      <label class="mode"><input type="radio" name="mode" value="folder">
+        <b>New library from a folder</b>
+        <span>Every image becomes one material. Good for vendor swatch folders. Saved as <code>FolderName.pymat</code>.</span></label>
+    </div>
+
+    <h3>Texture folder</h3>
+    <div class="drop" id="drop">
+      <button class="btn primary" id="pick" type="button">Choose folder&hellip;</button>
+      <p id="dropHint">or drag the folder onto this box</p>
+      <input type="file" id="fallbackInput" webkitdirectory multiple hidden>
+    </div>
+    <div id="loaded" hidden>
+      <p class="note" id="loadedInfo" style="margin:12px 0 0"></p>
+      <div class="row" id="pymatRow" style="margin-top:10px" hidden>
+        <label class="f">Library to add to
+          <select id="pymatSel"></select></label>
+      </div>
+    </div>
+    <div id="s1msgs"></div>
+  </section>
+
+  <section class="card" id="s2" hidden>
+    <h2><span class="n">2</span> Review the materials</h2>
+    <div class="row">
+      <label class="f">Bump slot uses
+        <select id="bumpPref">
+          <option value="auto">Auto (bump, then height, then roughness)</option>
+          <option value="rough">Roughness map</option>
+          <option value="height">Height map</option>
+        </select></label>
+      <label class="f" id="stripWrap">Remove from names (optional)
+        <input type="text" id="strip" placeholder=" ?540 x 540| ?swatch" size="26" spellcheck="false"></label>
+      <label class="chk"><input type="checkbox" id="thumbs" checked> Draw preview thumbnails</label>
+    </div>
+    <div id="s2msgs"></div>
+    <div class="tablewrap" id="tablewrap" hidden>
+      <table>
+        <thead><tr>
+          <th><input type="checkbox" id="all" checked aria-label="Select all"></th>
+          <th></th><th>Material name</th><th>Colour map</th><th>Bump slot</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="note" id="skipInfo" style="margin-bottom:0"></p>
+  </section>
+
+  <section id="s3msgs"></section>
+</main>
+
+<div class="bar" id="bar" hidden>
+  <div class="in">
+    <div id="status" role="status"></div>
+    <button class="btn primary" id="create" type="button" disabled>Create .pymat</button>
+  </div>
+</div>
+
+<footer class="wrap">
+  Unofficial community tool, not affiliated with PYTHA Lab. The <code>.pymat</code> layout was worked out from PYTHA V26 files; untested on other versions. Work on copies, keep backups, and close PYTHA before swapping a library in.
+</footer>
+
+<script>
+'use strict';
+/* ================================================================== core (port of pymat_from_textures_shareable.py) */
+const IMG = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp']);
+const KINDS = [
+  ['normal', /normal(gl|dx)?|nrm/i],
+  ['ao',     /ambientocclusion|(^|[_\-. ])ao($|[_\-. ])|occlusion/i],
+  ['metal',  /metal(ness|lic)?($|[_\-. ])/i],
+  ['rough',  /rough(ness)?/i],
+  ['height', /displacement|height|disp($|[_\-. ])/i],
+  ['bump',   /bump/i],
+  ['color',  /base[_\-. ]?colou?r|albedo|diffuse|colou?r|(^|[_\-. ])d($|[_\-. ])/i],
+];
+const KIND_LABEL = { rough: 'Roughness', bump: 'Bump', height: 'Height' };
+
+const extOf = f => { const i = f.lastIndexOf('.'); return i < 0 ? '' : f.slice(i).toLowerCase(); };
+const baseName = p => p.slice(p.lastIndexOf('/') + 1);
+const dirName = p => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
+const stemOf = f => { const i = f.lastIndexOf('.'); return i <= 0 ? f : f.slice(0, i); };
+
+function classify(stem) {
+  for (const [k, rx] of KINDS) if (rx.test(stem)) return [k, rx];
+  return [null, null];
+}
+const clean = s => s.replace(/[_\-. ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const title = s => s.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+
+/* paths: array of paths relative to the texture folder -> Map "dir|key" -> {dir,key,maps,stem} */
+function scan(paths, plain) {
+  const sets = new Map();
+  for (const rel of paths) {
+    const f = baseName(rel);
+    if (!IMG.has(extOf(f))) continue;
+    const stem = stemOf(f);
+    let [kind, rx] = classify(stem), key;
+    if (kind === null) {
+      if (!plain) continue;              // sync mode: ignore previews / stray images
+      kind = 'color'; key = stem;        // vendor swatch: one image = one material
+    } else {
+      key = clean(stem.replace(rx, ' ')).toLowerCase();
+    }
+    const d = dirName(rel), id = d + '|' + key;
+    let s = sets.get(id);
+    if (!s) { s = { dir: d, key, maps: {}, stem }; sets.set(id, s); }
+    s.maps[kind] = rel;
+    if (kind === 'color') s.stem = stem;
+  }
+  return sets;
+}
+
+function bumpOrder(pref) {
+  return pref === 'rough' ? ['rough', 'bump', 'height'] : pref === 'height' ? ['height', 'bump', 'rough'] : ['bump', 'height', 'rough'];
+}
+
+/* -> {items, skipped}; items are what the review table shows */
+function planMaterials(sets, used, standalone, strip, bumpPref) {
+  const byDir = new Map();
+  for (const s of sets.values()) { if (!byDir.has(s.dir)) byDir.set(s.dir, []); byDir.get(s.dir).push(s); }
+  const order = bumpOrder(bumpPref), items = [];
+  let skipped = 0;
+  for (const d of [...byDir.keys()].sort()) {
+    const group = byDir.get(d).filter(s => s.maps.color).sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    for (const s of group) {
+      if (used.has(s.maps.color.toLowerCase())) { skipped++; continue; }
+      const it = { dir: d, key: s.key, stem: s.stem, maps: s.maps, group: group.length, include: true, edited: false };
+      it.bumpKind = order.find(k => s.maps[k]) || null;
+      it.name = it.autoName = autoName(it, standalone, strip);
+      items.push(it);
+    }
+  }
+  return { items, skipped };
+}
+
+function autoName(it, standalone, strip) {
+  const base = it.dir ? baseName(it.dir) : '';
+  let name;
+  if (standalone) {
+    const label = (it.key === it.stem || !it.key) ? it.stem.replace(/_/g, ' ').replace(/\s+/g, ' ').trim() : title(clean(it.key));
+    if (it.dir && it.group === 1) name = base;
+    else if (it.dir) name = base + ' - ' + label;
+    else name = label;
+    if (strip) name = name.replace(strip, '').trim();
+  } else {
+    const b = it.dir ? base : 'ROOT';
+    name = it.group === 1 ? b : b + ' - ' + title(it.key);
+  }
+  return cleanName(name);
+}
+const cleanName = n => (n.replace(/[<>&"]/g, '').replace(/\s+/g, ' ').trim()) || 'Material';
+
+const urlFor = rel => './' + rel.split('/').map(p => encodeURIComponent(p).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())).join('/');
+const safeDecode = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
+
+function materialXml(name, mid, colorAid, bumpAid, previewB64) {
+  const L = [], a = s => L.push(s);
+  a(`    <material name="${name}" id="${mid}">`);
+  a('      <a:attributes>');
+  a('        <a:color-srgb id="1000001" t="c">');
+  for (let i = 0; i < 3; i++) a('          <a:f r="0" t="d">0.5</a:f>');
+  a('        </a:color-srgb>');
+  a('        <a:diffuse id="1000002" t="d">0.80000000000000004</a:diffuse>');
+  a('        <a:texture-size id="1000009" t="c">');
+  a('          <a:f r="0" t="d" i="4">0</a:f>'); a('          <a:f r="0" t="d" i="4">0</a:f>');
+  a('        </a:texture-size>');
+  a('        <a:texture-asset id="1000010" t="c">');
+  a('          <a:f r="0" t="i" i="1">33</a:f>'); a(`          <a:f r="0" t="i" i="1">${colorAid}</a:f>`); a('          <a:f r="0" t="i" i="1">0</a:f>');
+  a('        </a:texture-asset>');
+  if (bumpAid) {
+    a('        <a:bumpmap-asset id="1000012" t="c">');
+    a('          <a:f r="0" t="i" i="1">33</a:f>'); a(`          <a:f r="0" t="i" i="1">${bumpAid}</a:f>`); a('          <a:f r="0" t="i" i="1">0</a:f>');
+    a('        </a:bumpmap-asset>');
+    a('        <a:bumpmap-angle id="1000013" t="d">0.10000000000000001</a:bumpmap-angle>');
+  }
+  for (const aid of ['1000014', '1000015']) {
+    a(`        <a:attribute id="${aid}" t="c">`);
+    a('          <a:f r="0" t="i" i="1">28</a:f>'); a(`          <a:f r="0" t="i" i="1">${mid}</a:f>`); a('          <a:f r="0" t="i" i="1">0</a:f>');
+    a('        </a:attribute>');
+  }
+  a('      </a:attributes>');
+  if (previewB64) {
+    a('      <preview>'); a('        <image size="135" type="image/png">'); a(previewB64 + '</image>'); a('      </preview>');
+  }
+  a('    </material>');
+  return L;
+}
+
+const assetsXml = list => list.map(([aid, rel]) =>
+  `    <asset id="${aid}">\n      <source url="${urlFor(rel)}" />\n      <a:attributes></a:attributes>\n    </asset>\n`).join('');
+
+function skeleton() {
+  const d = new Date().toISOString().replace(/\.\d+Z$/, '.000Z');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<pymat xmlns="http://xmlns.pytha.com/materials/1.0" xmlns:a="http://xmlns.pytha.com/attributes/1.0">
+  <header>
+    <unit-system>
+      <length>inch</length>
+    </unit-system>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:xmp="http://ns.adobe.com/xap/1.0/">
+      <rdf:Description rdf:about="">
+        <xmp:CreatorTool>PYTHA V26</xmp:CreatorTool>
+        <xmp:CreateDate>${d}</xmp:CreateDate>
+      </rdf:Description>
+    </rdf:RDF>
+  </header>
+  <extension-attributes></extension-attributes>
+  <materials>
+  </materials>
+  <assets>
+  </assets>
+</pymat>
+`;
+}
+
+/* ================================================================== preview thumbnail (textured sphere on a checkerboard) */
+async function renderPreview(file, N = 135, SS = 3) {
+  let bmp;
+  try { bmp = await createImageBitmap(file); } catch (e) { return null; }
+  try {
+    const w = bmp.width, h = bmp.height, m = Math.min(w, h);
+    const tc = document.createElement('canvas'); tc.width = tc.height = 256;
+    const tg = tc.getContext('2d', { willReadFrequently: true });
+    tg.imageSmoothingQuality = 'high';
+    tg.drawImage(bmp, (w - m) >> 1, (h - m) >> 1, m, m, 0, 0, 256, 256);
+    const tex = tg.getImageData(0, 0, 256, 256).data;
+    const n = N * SS, px = new Uint8ClampedArray(n * n * 4);
+    const ang = 0.45, ca = Math.cos(ang), sa = Math.sin(ang);
+    const cx = n * 0.5, cy = n * 0.52, r = n * 0.40;
+    let Lx = -0.45, Ly = -0.55, Lz = 0.70; const ln = Math.hypot(Lx, Ly, Lz); Lx /= ln; Ly /= ln; Lz /= ln;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const o = (y * n + x) * 4;
+        const dx = (x - cx) / r, dy = (y - cy) / r, d2 = dx * dx + dy * dy;
+        let R, G, B;
+        if (d2 < 1) {
+          const dz = Math.sqrt(Math.max(0, 1 - d2));
+          const u = Math.min(255, Math.max(0, Math.trunc((dx * 0.5 + 0.5) * 255)));
+          const v = Math.min(255, Math.max(0, Math.trunc((dy * 0.5 + 0.5) * 255)));
+          const t = (v * 256 + u) * 4;
+          const lam = Math.min(1, Math.max(0, dx * Lx + dy * Ly + dz * Lz));
+          const spec = Math.pow(Math.min(1, Math.max(0, 2 * lam * dz - Lz)), 24) * 0.25;
+          const k = 0.35 + 0.75 * lam;
+          R = (tex[t] / 255) * k + spec; G = (tex[t + 1] / 255) * k + spec; B = (tex[t + 2] / 255) * k + spec;
+        } else {
+          const qx = x / n - 0.5, qy = y / n - 0.5;
+          const rx = qx * ca - qy * sa, ry = qx * sa + qy * ca;
+          const depth = 1.0 + 0.5 * (ry + 0.5);
+          const chk = (((Math.floor(rx / depth * 7) + Math.floor(ry / depth * 7)) % 2) + 2) % 2;
+          R = G = B = chk === 0 ? 0.92 : 0.22;
+        }
+        px[o] = Math.min(1, Math.max(0, R)) * 255; px[o + 1] = Math.min(1, Math.max(0, G)) * 255;
+        px[o + 2] = Math.min(1, Math.max(0, B)) * 255; px[o + 3] = 255;
+      }
+    }
+    const big = document.createElement('canvas'); big.width = big.height = n;
+    big.getContext('2d').putImageData(new ImageData(px, n, n), 0, 0);
+    const sm = document.createElement('canvas'); sm.width = sm.height = N;
+    const sg = sm.getContext('2d'); sg.imageSmoothingQuality = 'high'; sg.drawImage(big, 0, 0, N, N);
+    const blob = await new Promise(res => sm.toBlob(res, 'image/png'));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    const b64 = btoa(bin);
+    return b64.replace(/(.{76})/g, '$1\n').replace(/\n$/, '');
+  } finally { bmp.close && bmp.close(); }
+}
+
+/* ================================================================== UI state */
+const $ = id => document.getElementById(id);
+const S = {
+  mode: 'sync', root: null,          // root = {name, handle|null, entries:[{path, get()}]}
+  pymatPath: null, lib: null, items: [], skipped: 0, texDir: '',
+  previews: new Map(), gen: 0, busy: false, strip: null,
+};
+const HAS_PICKER = typeof window.showDirectoryPicker === 'function';
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function setMsgs(id, list) {
+  $(id).innerHTML = list.map(m => `<div class="msg ${m.t}">${m.html}</div>`).join('');
+}
+
+/* ---------- loading a folder */
+async function walk(dir, prefix, out) {
+  for await (const [name, h] of dir.entries()) {
+    if (h.kind === 'directory') { if (!name.startsWith('.')) await walk(h, prefix + name + '/', out); }
+    else out.push({ path: prefix + name, get: () => h.getFile() });
+  }
+}
+async function loadHandle(handle) {
+  showStatus('Reading folder…');
+  const entries = [];
+  await walk(handle, '', entries);
+  setRoot({ name: handle.name, handle, entries });
+}
+function loadFileList(files) {
+  const entries = []; let name = 'textures';
+  for (const f of files) {
+    const parts = (f.webkitRelativePath || f.name).split('/');
+    name = parts[0];
+    const rel = parts.slice(1);
+    if (!rel.length || rel.slice(0, -1).some(d => d.startsWith('.'))) continue;
+    entries.push({ path: rel.join('/'), get: async () => f });
+  }
+  setRoot({ name, handle: null, entries });
+}
+function setRoot(root) {
+  S.root = root; S.previews.clear(); S.pymatPath = null; $('s3msgs').innerHTML = '';
+  const imgs = root.entries.filter(e => IMG.has(extOf(e.path))).length;
+  $('loaded').hidden = false;
+  $('loadedInfo').innerHTML = `<b>${esc(root.name)}</b> &mdash; ${imgs} image${imgs === 1 ? '' : 's'} found` +
+    (root.handle ? '' : ` &middot; <span title="This browser can't write into folders, so the result will download instead.">result will download as a file</span>`);
+  refresh();
+}
+
+/* ---------- build the plan from the current folder + mode */
+async function refresh() {
+  if (!S.root) return;
+  const gen = ++S.gen, standalone = S.mode === 'folder';
+  const s1 = [], s2 = [];
+  S.lib = null; S.items = []; S.skipped = 0;
+  $('stripWrap').hidden = !standalone;
+
+  const pymats = S.root.entries.map(e => e.path).filter(p => extOf(p) === '.pymat')
+    .sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1));
+  $('pymatRow').hidden = standalone || pymats.length < 2;
+
+  let texDir = '', used = new Set();
+  if (!standalone) {
+    if (!pymats.length) {
+      s1.push({ t: 'warn', html: `No <code>.pymat</code> file was found in this folder. Pick the folder that contains your library, or switch to <b>New library from a folder</b>.` });
+      return finish();
+    }
+    if (!S.pymatPath || !pymats.includes(S.pymatPath)) S.pymatPath = pymats[0];
+    $('pymatSel').innerHTML = pymats.map(p => `<option value="${esc(p)}"${p === S.pymatPath ? ' selected' : ''}>${esc(p)}</option>`).join('');
+    texDir = dirName(S.pymatPath);
+    try { S.lib = await readLibrary(S.pymatPath); } catch (e) { s1.push({ t: 'err', html: esc(e.message) }); return finish(); }
+    if (gen !== S.gen) return;
+  }
+  S.texDir = texDir;
+  const prefix = texDir ? texDir + '/' : '';
+  const scoped = S.root.entries.filter(e => e.path.startsWith(prefix)).map(e => e.path.slice(prefix.length));
+
+  if (S.lib) {
+    const have = new Set(scoped.map(p => p.toLowerCase()));
+    const warn = [];
+    for (const u of S.lib.urls) {
+      if (u.startsWith('file:///')) { warn.push(`Absolute link (only works on one PC): <code>${esc(safeDecode(u.slice(8)).replace(/\\/g, '/'))}</code>`); continue; }
+      const rel = resolveRel(safeDecode(u));
+      used.add(rel.toLowerCase());
+      if (rel.startsWith('../')) continue;           // outside the chosen folder - can't check
+      if (!have.has(rel.toLowerCase())) warn.push(`Missing file: <code>${esc(rel)}</code>`);
+    }
+    S.lib.used = used;
+    if (warn.length) s1.push({ t: 'warn', html: `<b>${warn.length} problem${warn.length === 1 ? '' : 's'} in the existing library</b> (not changed by this tool):<ul>${warn.slice(0, 12).map(w => `<li>${w}</li>`).join('')}</ul>${warn.length > 12 ? `…and ${warn.length - 12} more` : ''}` });
+  }
+
+  const strip = compileStrip(s2);
+  const { items, skipped } = planMaterials(scan(scoped, standalone), used, standalone, strip, $('bumpPref').value);
+  S.items = items; S.skipped = skipped; S.strip = strip;
+  finish();
+
+  function finish() {
+    if (gen !== S.gen) return;
+    setMsgs('s1msgs', s1); setMsgs('s2msgs', s2);
+    $('s2').hidden = false; $('bar').hidden = false;
+    renderTable(); queuePreviews(gen);
+  }
+}
+
+function compileStrip(msgs) {
+  const v = $('strip').value;
+  if (!v || S.mode !== 'folder') return null;
+  try { return new RegExp(v, 'gi'); } catch (e) { msgs.push({ t: 'warn', html: `That "remove from names" pattern isn't valid yet (${esc(e.message)}). It is being ignored.` }); return null; }
+}
+
+function resolveRel(p) {
+  const out = [];
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (seg === '' || seg === '.') continue;
+    if (seg === '..') { if (out.length && out[out.length - 1] !== '..') out.pop(); else out.push('..'); } else out.push(seg);
+  }
+  return out.join('/');
+}
+
+async function readLibrary(path) {
+  const e = S.root.entries.find(x => x.path === path);
+  const buf = new Uint8Array(await (await e.get()).arrayBuffer());
+  const bom = buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF;
+  const text = new TextDecoder('utf-8').decode(buf);
+  const crlf = text.includes('\r\n'), xml = text.replace(/\r\n/g, '\n');
+  const ids = [...xml.matchAll(/<(?:material|asset) [^>]*?id="(\d+)"/g)].map(m => +m[1]);
+  if (!ids.length || !xml.includes('  </materials>') || !xml.includes('  </assets>'))
+    throw new Error(`"${path}" doesn't look like a PYTHA material library this tool understands (no materials/assets sections found).`);
+  return {
+    bom, crlf, xml, next: Math.max(...ids) + 1,
+    names: new Set([...xml.matchAll(/<material name="([^"]+)"/g)].map(m => m[1])),
+    urls: [...xml.matchAll(/<source url="([^"]+)"/g)].map(m => m[1]),
+  };
+}
+
+/* ---------- review table */
+function colorKey(it) { return (S.texDir ? S.texDir + '/' : '') + it.maps.color; }
+function dupSet() {
+  const seen = new Map(), dups = new Set();
+  const names = S.lib ? S.lib.names : new Set();
+  for (const it of S.items) if (it.include) {
+    const n = cleanName(it.name);
+    if (seen.has(n) || names.has(n)) dups.add(n);
+    seen.set(n, 1);
+  }
+  return dups;
+}
+function renderTable() {
+  const wrap = $('tablewrap');
+  wrap.hidden = !S.items.length;
+  const standalone = S.mode === 'folder';
+  $('skipInfo').textContent = S.items.length
+    ? (S.skipped ? `${S.skipped} texture set${S.skipped === 1 ? '' : 's'} already in the library ${S.skipped === 1 ? 'was' : 'were'} skipped.` : '')
+    : (standalone ? 'No images found in that folder.' :
+       `Nothing new — the library already covers every texture set${S.skipped ? ` (${S.skipped} checked)` : ''}. Image files without a map word in their name (colour, basecolor, diffuse, albedo, roughness, bump…) are ignored in this mode.`);
+  const dups = dupSet();
+  $('rows').innerHTML = S.items.map((it, i) => {
+    const opts = ['rough', 'bump', 'height'].filter(k => it.maps[k]);
+    const sel = `<select data-i="${i}" data-f="bump"><option value="">None</option>` +
+      opts.map(k => `<option value="${k}"${it.bumpKind === k ? ' selected' : ''}>${KIND_LABEL[k]} &mdash; ${esc(baseName(it.maps[k]))}</option>`).join('') + '</select>';
+    return `<tr class="${it.include ? '' : 'off'}">
+      <td><input type="checkbox" data-i="${i}" data-f="inc" ${it.include ? 'checked' : ''} aria-label="Include"></td>
+      <td class="thumb"><img class="th" alt="" data-k="${esc(colorKey(it))}"></td>
+      <td class="name"><input type="text" data-i="${i}" data-f="name" value="${esc(it.name)}" class="${dups.has(cleanName(it.name)) && it.include ? 'dup' : ''}" spellcheck="false"></td>
+      <td><span class="fn" title="${esc(it.maps.color)}">${esc(baseName(it.maps.color))}</span></td>
+      <td>${sel}</td></tr>`;
+  }).join('');
+  for (const img of $('rows').querySelectorAll('img[data-k]')) paintThumb(img);
+  updateBar();
+}
+function paintThumb(img) {
+  const p = S.previews.get(img.dataset.k);
+  if (p) img.src = 'data:image/png;base64,' + p.replace(/\n/g, '');
+  else img.removeAttribute('src');
+}
+function updateBar() {
+  const n = S.items.filter(i => i.include).length;
+  const standalone = S.mode === 'folder';
+  const dest = destName();
+  if (!S.busy) $('status').innerHTML = S.items.length
+    ? `<b>${n}</b> of ${S.items.length} material${S.items.length === 1 ? '' : 's'} selected` + (dest ? ` &rarr; <code>${esc(dest)}</code>` : '')
+    : (standalone ? 'Choose a folder with images.' : 'Choose a folder containing a .pymat library.');
+  $('create').disabled = S.busy || !n;
+  $('all').checked = S.items.length > 0 && n === S.items.length;
+}
+function destName() {
+  if (!S.root) return '';
+  if (S.mode === 'sync') return S.pymatPath ? uniqueFile(S.texDir, stemOf(baseName(S.pymatPath)) + '_NEW', '.pymat') : '';
+  return uniqueFile('', S.root.name, '.pymat');
+}
+function uniqueFile(dir, base, ext) {
+  const have = new Set(S.root.entries.map(e => e.path.toLowerCase()));
+  const pre = dir ? dir + '/' : '';
+  let name = base + ext, i = 2;
+  if (S.mode === 'sync') return name;                   // _NEW copies are this tool's own output; overwritten on re-run
+  while (have.has((pre + name).toLowerCase())) name = `${base}_NEW${i > 2 ? ' ' + i : ''}${ext}`, i++;
+  return name;
+}
+
+/* ---------- thumbnails */
+async function ensurePreview(it) {
+  const k = colorKey(it);
+  if (S.previews.has(k)) return S.previews.get(k);
+  const e = S.root.entries.find(x => x.path === k);
+  let b64 = null;
+  try { b64 = await renderPreview(await e.get()); } catch (err) { b64 = null; }
+  S.previews.set(k, b64);
+  return b64;
+}
+async function queuePreviews(gen) {
+  if (!$('thumbs').checked) return;
+  for (const it of S.items) {
+    if (gen !== S.gen) return;
+    const k = colorKey(it);
+    if (S.previews.has(k)) continue;
+    await ensurePreview(it);
+    for (const img of $('rows').querySelectorAll('img[data-k]')) if (img.dataset.k === k) paintThumb(img);
+    await new Promise(r => setTimeout(r, 0));
+  }
+}
+
+/* ---------- create + save */
+async function create() {
+  const sel = S.items.filter(i => i.include);
+  if (!sel.length || S.busy) return;
+  S.busy = true; updateBar(); $('s3msgs').innerHTML = '';
+  try {
+    const withThumbs = $('thumbs').checked, standalone = S.mode === 'folder';
+    const previews = [];
+    for (let i = 0; i < sel.length; i++) {
+      $('status').innerHTML = `Drawing thumbnails… ${i + 1} / ${sel.length} <progress max="${sel.length}" value="${i}"></progress>`;
+      previews.push(withThumbs ? await ensurePreview(sel[i]) : null);
+      if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
+    }
+    $('status').textContent = 'Writing file…';
+    const names = new Set(standalone ? [] : S.lib.names);
+    let nxt = standalone ? 1001 : S.lib.next;
+    const prefix = S.texDir ? S.texDir + '/' : '';
+    const mats = [], assets = [];
+    sel.forEach((it, i) => {
+      let name = cleanName(it.name), n0 = name, k = 2;
+      while (names.has(name)) name = `${n0} (${k++})`;
+      names.add(name);
+      const caid = nxt++; assets.push([caid, it.maps.color]);
+      let baid = null;
+      if (it.bumpKind) { baid = nxt++; assets.push([baid, it.maps[it.bumpKind]]); }
+      mats.push(materialXml(name, nxt++, caid, baid, previews[i]));
+    });
+    const matText = mats.map(m => m.join('\n')).join('\n');
+    let out, fileName, dir = S.texDir;
+    if (standalone) {
+      out = skeleton()
+        .replace('  <materials>\n', () => '  <materials>\n' + matText + '\n')
+        .replace('  <assets>\n', () => '  <assets>\n' + assetsXml(assets))
+        .replace(/\n/g, '\r\n');
+      fileName = destName();
+    } else {
+      out = S.lib.xml
+        .replace('  </materials>', () => matText + '\n  </materials>')
+        .replace('  </assets>', () => assetsXml(assets) + '  </assets>');
+      if (S.lib.crlf) out = out.replace(/\n/g, '\r\n');
+      fileName = destName();
+    }
+    const enc = new TextEncoder().encode(out);
+    const bytes = (!standalone && S.lib.bom) ? Uint8Array.from([0xEF, 0xBB, 0xBF, ...enc]) : enc;
+    const saved = await saveFile(dir, fileName, bytes);
+    const where = (dir ? dir + '/' : '') + fileName;
+    const steps = standalone
+      ? `Copy the <code>.pymat</code> into PYTHA's material folder <b>together with its textures</b> (links are relative), or open it from where it is.`
+      : `Next: back up your original library, close PYTHA, then rename <code>${esc(fileName)}</code> over it. Keep it next to its textures (links are relative).`;
+    setMsgs('s3msgs', [{ t: 'ok', html: `<b>${sel.length} material${sel.length === 1 ? '' : 's'} added.</b> ` +
+      (saved ? `Saved <code>${esc(where)}</code> inside <b>${esc(S.root.name)}</b>.` : `Downloaded <code>${esc(fileName)}</code> &mdash; move it ${standalone ? 'into' : 'next to your original library in'} <b>${esc(S.root.name)}</b>.`) +
+      `<br>${steps}` }]);
+    $('s3msgs').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } catch (e) {
+    console.error(e);
+    setMsgs('s3msgs', [{ t: 'err', html: `Something went wrong: ${esc(e.message || e)}` }]);
+  } finally { S.busy = false; updateBar(); }
+}
+
+async function saveFile(dir, fileName, bytes) {
+  const h = S.root.handle;
+  if (h) {
+    let ok = true;
+    if (h.queryPermission) {
+      ok = (await h.queryPermission({ mode: 'readwrite' })) === 'granted' || (await h.requestPermission({ mode: 'readwrite' })) === 'granted';
+    }
+    if (ok) {
+      let d = h;
+      for (const seg of dir.split('/').filter(Boolean)) d = await d.getDirectoryHandle(seg);
+      const fh = await d.getFileHandle(fileName, { create: true });
+      const w = await fh.createWritable(); await w.write(bytes); await w.close();
+      const path = (dir ? dir + '/' : '') + fileName;
+      if (!S.root.entries.some(e => e.path === path)) S.root.entries.push({ path, get: () => fh.getFile() });
+      return true;
+    }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/xml' }));
+  a.download = fileName; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  return false;
+}
+
+/* ================================================================== wiring */
+function showStatus(t) { $('status').textContent = t; $('bar').hidden = false; }
+
+$('pick').addEventListener('click', async () => {
+  if (HAS_PICKER) {
+    try { await loadHandle(await window.showDirectoryPicker({ mode: 'readwrite', id: 'pymat-textures' })); }
+    catch (e) { if (e.name !== 'AbortError') { console.error(e); setMsgs('s1msgs', [{ t: 'err', html: esc(e.message) }]); } }
+  } else $('fallbackInput').click();
+});
+$('fallbackInput').addEventListener('change', e => { if (e.target.files.length) loadFileList(e.target.files); e.target.value = ''; });
+if (!HAS_PICKER) $('dropHint').textContent = 'Your browser can read folders but not save into them; the finished file will download. Chrome or Edge can save straight into the folder.';
+
+const drop = $('drop');
+drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+drop.addEventListener('drop', async e => {
+  e.preventDefault(); drop.classList.remove('over');
+  const item = e.dataTransfer.items && e.dataTransfer.items[0];
+  if (item && item.getAsFileSystemHandle) {
+    const h = await item.getAsFileSystemHandle();
+    if (h && h.kind === 'directory') return loadHandle(h);
+  }
+  setMsgs('s1msgs', [{ t: 'warn', html: 'Dropping folders isn\'t supported in this browser. Use the <b>Choose folder…</b> button instead.' }]);
+});
+
+document.querySelectorAll('input[name=mode]').forEach(r => r.addEventListener('change', () => { S.mode = r.value; $('s3msgs').innerHTML = ''; refresh(); }));
+$('pymatSel').addEventListener('change', e => { S.pymatPath = e.target.value; refresh(); });
+$('bumpPref').addEventListener('change', refresh);
+$('thumbs').addEventListener('change', () => { if ($('thumbs').checked) queuePreviews(S.gen); });
+let stripTimer;
+$('strip').addEventListener('input', () => {
+  clearTimeout(stripTimer);
+  stripTimer = setTimeout(() => {
+    const msgs = [], strip = compileStrip(msgs);
+    setMsgs('s2msgs', msgs);
+    for (const it of S.items) {
+      const fresh = autoName(it, true, strip);
+      if (!it.edited) it.name = fresh;
+      it.autoName = fresh;
+    }
+    renderTable();
+  }, 250);
+});
+$('rows').addEventListener('input', e => {
+  const t = e.target, it = S.items[+t.dataset.i];
+  if (!it) return;
+  if (t.dataset.f === 'name') { it.name = t.value; it.edited = true; const d = dupSet(); $('rows').querySelectorAll('input[data-f=name]').forEach((inp, i) => inp.classList.toggle('dup', S.items[i].include && d.has(cleanName(S.items[i].name)))); updateBar(); }
+});
+$('rows').addEventListener('change', e => {
+  const t = e.target, it = S.items[+t.dataset.i];
+  if (!it) return;
+  if (t.dataset.f === 'inc') { it.include = t.checked; t.closest('tr').classList.toggle('off', !it.include); updateBar(); }
+  if (t.dataset.f === 'bump') it.bumpKind = t.value || null;
+});
+$('all').addEventListener('change', e => { S.items.forEach(i => i.include = e.target.checked); renderTable(); });
+$('create').addEventListener('click', create);
+</script>
+</body>
+</html>
