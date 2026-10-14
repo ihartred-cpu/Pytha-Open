@@ -41,6 +41,7 @@ You can still change or clear the bump for any material in the list. *Add to an 
 **Rotate all images 90° clockwise (New library from a folder, Chrome or Edge).** Tick this to turn every texture a quarter turn, for example to make portrait sheets landscape. The page saves rotated copies of the images used by the selected materials into a new `FolderName (rotated)` folder inside the folder you chose, with the `.pymat` next to them, and links the materials to the copies. Your originals are not changed. Any EXIF rotation in a photo is applied first. JPEGs stay JPEGs; PNG, TIF and BMP images are saved as PNG. Rotating very large images takes a while and needs plenty of memory, and a `(rotated)` folder is never scanned as source textures if you pick the folder again.
 
 ## Good to know
+- **Cancel** (or press Esc) stops a run in progress. It takes effect between images, so a very large image finishes first. Nothing is saved, and a half-made `(rotated)` folder is removed again. Your originals are never touched.
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.
 - New materials get a grey colour, diffuse 0.8 and texture size 0. Set the real texture size in PYTHA's material editor.

@@ -73,6 +73,7 @@ td select{width:100%;max-width:280px}
 td.name input.dup{border-color:var(--warn)}
 td .fn{font-size:12.5px;color:var(--muted);word-break:break-all}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px;z-index:5}
+.bar .acts{display:flex;gap:10px;align-items:center}
 .bar .in{max-width:980px;margin:0 auto;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
 #status{font-size:14px}
 progress{width:140px;height:8px;vertical-align:middle}
@@ -148,7 +149,10 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
 <div class="bar" id="bar" hidden>
   <div class="in">
     <div id="status" role="status"></div>
-    <button class="btn primary" id="create" type="button" disabled>Create .pymat</button>
+    <div class="acts">
+      <button class="btn" id="cancel" type="button" hidden>Cancel</button>
+      <button class="btn primary" id="create" type="button" disabled>Create .pymat</button>
+    </div>
   </div>
 </div>
 
@@ -584,6 +588,9 @@ function updateBar() {
     ? `<b>${n}</b> of ${S.items.length} material${S.items.length === 1 ? '' : 's'} selected` + (dest ? ` &rarr; <code>${esc(dest)}</code>` : '')
     : (standalone ? 'Choose a folder with images.' : 'Choose a folder containing a .pymat library.');
   $('create').disabled = S.busy || !n;
+  $('create').hidden = S.busy;
+  $('cancel').hidden = !S.busy;
+  $('cancel').disabled = !!S.abort;
   $('all').checked = S.items.length > 0 && n === S.items.length;
 }
 function destName() {
@@ -624,14 +631,24 @@ async function queuePreviews(gen) {
 }
 
 /* ---------- create + save */
+class AbortRun extends Error {}
+function checkAbort() { if (S.abort) throw new AbortRun('cancelled'); }
+function requestAbort() {
+  if (!S.busy || S.abort) return;
+  S.abort = true; $('cancel').disabled = true;
+  $('status').innerHTML = 'Cancelling&hellip; finishing the current image';
+}
+$('cancel').addEventListener('click', requestAbort);
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.busy) requestAbort(); });
 async function create() {
   const sel = S.items.filter(i => i.include);
   if (!sel.length || S.busy) return;
-  S.busy = true; updateBar(); $('s3msgs').innerHTML = '';
+  S.busy = true; S.abort = false; updateBar(); $('s3msgs').innerHTML = '';
+  let outDir = '', madeDir = false;
   try {
     const withThumbs = $('thumbs').checked, standalone = S.mode === 'folder';
     const rotate = standalone && $('rotate').checked && !!S.root.handle;
-    let outDir = '', nRot = 0; const relMap = new Map(), rotPrev = new Map();
+    let nRot = 0; const relMap = new Map(), rotPrev = new Map();
     if (rotate) {
       if (!(await canWrite())) throw new Error('Permission to save into the folder was not given.');
       outDir = await freeRotatedName();
@@ -640,10 +657,12 @@ async function create() {
       nRot = need.length;
       for (let i = 0; i < need.length; i++) {
         const rel = need[i];
+        checkAbort();
         $('status').innerHTML = `Rotating images… ${i + 1} / ${need.length} <progress max="${need.length}" value="${i}"></progress>`;
         const e = S.root.entries.find(x => x.path === rel);
         const { blob, ext } = await rotateCW(await e.get(), extOf(rel));
         const outRel = ext === extOf(rel) ? rel : rel.slice(0, rel.length - extOf(rel).length) + ext;
+        madeDir = true;
         await writeAt(outDir + '/' + dirName(outRel), baseName(outRel), blob);
         relMap.set(rel, outRel);
         if (withThumbs && colours.has(rel)) rotPrev.set(rel, await renderPreview(blob));
@@ -652,6 +671,7 @@ async function create() {
     }
     const previews = [];
     for (let i = 0; i < sel.length; i++) {
+      checkAbort();
       $('status').innerHTML = `Drawing thumbnails… ${i + 1} / ${sel.length} <progress max="${sel.length}" value="${i}"></progress>`;
       previews.push(rotate ? (rotPrev.get(sel[i].maps.color) || null) : (withThumbs ? await ensurePreview(sel[i]) : null));
       if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
@@ -689,6 +709,7 @@ async function create() {
     }
     const enc = new TextEncoder().encode(out);
     const bytes = (!standalone && S.lib.bom) ? Uint8Array.from([0xEF, 0xBB, 0xBF, ...enc]) : enc;
+    checkAbort();
     const saved = await saveFile(dir, fileName, bytes);
     const where = (dir ? dir + '/' : '') + fileName;
     const rotNote = rotate ? ` ${nRot} rotated image${nRot === 1 ? '' : 's'} saved alongside it; your originals were not changed.` : '';
@@ -700,9 +721,18 @@ async function create() {
       `<br>${steps}` }]);
     $('s3msgs').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
-    console.error(e);
-    setMsgs('s3msgs', [{ t: 'err', html: `Something went wrong: ${esc(e.message || e)}` }]);
-  } finally { S.busy = false; updateBar(); }
+    if (e instanceof AbortRun) {
+      let note = 'Nothing was saved.';
+      if (madeDir) {
+        try { await S.root.handle.removeEntry(outDir, { recursive: true }); }
+        catch (err) { note = `The partly rotated images were left in <code>${esc(outDir)}</code> &mdash; you can delete that folder.`; }
+      }
+      setMsgs('s3msgs', [{ t: 'warn', html: `<b>Cancelled.</b> ${note}` }]);
+    } else {
+      console.error(e);
+      setMsgs('s3msgs', [{ t: 'err', html: `Something went wrong: ${esc(e.message || e)}` }]);
+    }
+  } finally { S.busy = false; S.abort = false; updateBar(); }
 }
 
 /* rotate 90 degrees clockwise; createImageBitmap applies any EXIF orientation first */
