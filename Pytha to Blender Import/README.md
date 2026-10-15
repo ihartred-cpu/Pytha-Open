@@ -10,7 +10,7 @@ Two parts that work together to bring a PYTHA model into Blender intact:
 PYTHA's glTF export drops layers and pens, and Blender's own importer turns the group tree into 100+ empties and mangles names like `0948_L204,H27,W18.5`. Together these fix that.
 
 ## Install
-- **PYTHA:** copy `Export Tags v1.0/` into your PYTHA plugin directory and restart PYTHA.
+- **PYTHA:** copy the whole `Export Tags v1.0` folder into PYTHA's plugin directory (`%AppData%\PYTHA26.0\plugins`), keeping the folder itself, and restart PYTHA.
 - **Blender:** *Edit > Preferences > Add-ons > Install from Disk*, pick `pytha_gltf_importer.py`, and enable it.
 
 ## How to use

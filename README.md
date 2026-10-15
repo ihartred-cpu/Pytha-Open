@@ -12,4 +12,4 @@ Unofficial community tools, not affiliated with PYTHA Lab. Built and tested on P
 
 Each folder has its own README with setup and usage.
 
-**Installing PYTHA plugins:** copy the plugin folder (the one containing `config.xml` and `main.lua`) into your PYTHA plugin directory and restart PYTHA. The plugin appears in the plugin sidebar.
+**Installing PYTHA plugins:** each plugin lives in its own folder inside PYTHA's plugin directory, `%AppData%\PYTHA26.0\plugins`. Copy the whole plugin folder (the one containing `config.xml` and `main.lua`) there, keeping the folder itself, and restart PYTHA. The plugin appears in the plugin sidebar.

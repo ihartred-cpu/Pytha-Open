@@ -14,7 +14,9 @@ What each number does:
 Existing numbers are kept; only new groups get the next free number. *Renumber everything* restarts the sequence.
 
 ## Install
-Copy this folder (`config.xml` + `main.lua`) into your PYTHA plugin directory and restart PYTHA.
+1. Open PYTHA's plugin directory: `%AppData%\PYTHA26.0\plugins` (paste that into the Windows Explorer address bar).
+2. Copy this whole folder, `Group Numbering v1.4`, into it. Keep the folder itself; don't copy just the files out of it.
+3. Restart PYTHA. **Group Numbering** appears in the plugin sidebar.
 
 ## How to use
 1. Run **Group Numbering** from the plugin sidebar and choose **Number Groups** (or **Remove number labels**).
