@@ -131,6 +131,7 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
         <input type="text" id="strip" placeholder=" ?540 x 540| ?swatch" size="26" spellcheck="false"></label>
       <label class="chk" id="fullWrap" title="Name every material exactly after its image file. Off: texture sets with partner maps are named without the map word (oak_basecolor + oak_roughness = Oak)."><input type="checkbox" id="fullNames"> Use full file names</label>
       <label class="chk" id="rotWrap" title="Saves rotated copies of the images used by the selected materials into a new '(rotated)' folder, with the .pymat next to them. Your originals are not changed."><input type="checkbox" id="rotate"> Rotate all images 90&deg; clockwise<span id="rotNote" class="note"></span></label>
+      <label class="chk" id="sizeWrap" title="Vendors often put the real tile size in the name, e.g. 100x32cm. Writes it as the material's tile size so the texture repeats at true scale. Only names with a unit (cm, mm, m, in) are used."><input type="checkbox" id="tileSize" checked> Read tile size from names like 100x32cm</label>
       <label class="chk"><input type="checkbox" id="thumbs" checked> Draw preview thumbnails</label>
       <button class="btn small" id="resetPrefs" type="button" title="Settings above are remembered in this browser. This puts them back to the starting values.">Reset settings</button>
     </div>
@@ -205,12 +206,25 @@ const baseName = p => p.slice(p.lastIndexOf('/') + 1);
 const dirName = p => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
 const stemOf = f => { const i = f.lastIndexOf('.'); return i <= 0 ? f : f.slice(0, i); };
 
+/* vendors such as Arroway end the name with a single letter: _d colour, _n normal, _b bump, _r roughness, _h height.
+   Checked first so a finish called "rough" in the name is not mistaken for a roughness map. */
+const LETTER_KINDS = { d: 'color', n: 'normal', b: 'bump', r: 'rough', h: 'height' };
+/* -> [kind, start, length] of the map word. The word nearest the END of the name wins, because the map type
+   comes last in vendor names ("Aluminium_Metal_Sheet_Base_color" is a colour map, not a metalness map). */
 function classify(stem) {
-  for (const [k, rx] of KINDS) if (rx.test(stem)) return [k, rx];
-  return [null, null];
+  const m = /[_\-.]([dnbrh])$/i.exec(stem);
+  if (m) return [LETTER_KINDS[m[1].toLowerCase()], m.index, m[0].length];
+  let best = null;
+  for (const [k, rx] of KINDS) {
+    const g = new RegExp(rx.source, 'gi');
+    let hit, last = null;
+    while ((hit = g.exec(stem))) { last = hit; if (hit[0].length === 0) g.lastIndex++; }
+    if (last && (!best || last.index + last[0].length > best[1] + best[2])) best = [k, last.index, last[0].length];
+  }
+  return best || [null, 0, 0];
 }
-const clean = s => s.replace(/[_\-. ]+/g, ' ').replace(/\s+/g, ' ').trim();
-const title = s => s.toLowerCase().replace(/(^|[^\p{L}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
+const clean = s => s.replace(/[_\-.# ]+/g, ' ').replace(/\s+/g, ' ').trim();
+const title = s => s.toLowerCase().replace(/(^|[^\p{L}\p{N}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
 
 /* paths: array of paths relative to the texture folder -> Map "dir|key" -> {dir,key,maps,stem} */
 const GENERIC_DIR = /^(textures?|tex|maps?|images?|imgs?|jpe?gs?|pngs?|source|materials?)$/i;
@@ -225,14 +239,15 @@ function scan(paths, plain) {
     const f = baseName(rel);
     if (!IMG.has(extOf(f))) continue;
     const stem = stemOf(f);
-    let [kind, rx] = classify(stem), key;
+    let [kind, at, len] = classify(stem), key;
     let swatch = false;
     if (kind === null) {
       if (!plain) continue;
       swatch = true;              // sync mode: ignore previews / stray images
       kind = 'color'; key = clean(stem).toLowerCase();  // vendor swatch: one image = one material (same key form as its maps)
     } else {
-      key = clean(stem.replace(rx, ' ')).toLowerCase();
+      key = clean(stem.slice(0, at) + ' ' + stem.slice(at + len)).toLowerCase();
+      if (kind === 'color') key = key.replace(/\s+colou?r\s*\d*$/, '');   // "...-color2_d" must group with its _n/_b/_r maps
     }
     const d = dirName(rel), id = d + '|' + key;
     let s = sets.get(id);
@@ -327,7 +342,15 @@ const cleanName = n => (n.replace(/[<>&"]/g, '').replace(/\s+/g, ' ').trim()) ||
 const urlFor = rel => './' + rel.split('/').map(p => encodeURIComponent(p).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())).join('/');
 const safeDecode = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
 
-function materialXml(name, mid, colorAid, bumpAid, previewB64) {
+/* tile size from a vendor name such as "...-100x32cm_d" -> [u, v] in inches, or null */
+function sizeFromName(file) {
+  const m = /(\d+(?:[.,]\d+)?)\s*[x\u00d7]\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m|in)(?![a-z])/i.exec(file);
+  if (!m) return null;
+  const f = { mm: 1 / 25.4, cm: 1 / 2.54, m: 1 / 0.0254, in: 1 }[m[3].toLowerCase()];
+  return [parseFloat(m[1].replace(',', '.')) * f, parseFloat(m[2].replace(',', '.')) * f];
+}
+const UNIT_PER_INCH = { inch: 1, inches: 1, in: 1, mm: 25.4, millimeter: 25.4, millimeters: 25.4, cm: 2.54, centimeter: 2.54, centimeters: 2.54, m: 0.0254, meter: 0.0254, meters: 0.0254 };
+function materialXml(name, mid, colorAid, bumpAid, previewB64, size) {
   const L = [], a = s => L.push(s);
   a(`    <material name="${name}" id="${mid}">`);
   a('      <a:attributes>');
@@ -343,7 +366,7 @@ function materialXml(name, mid, colorAid, bumpAid, previewB64) {
     a('        </a:gloss-curve>');
   }
   a('        <a:texture-size id="1000009" t="c">');
-  a('          <a:f r="0" t="d" i="4">0</a:f>'); a('          <a:f r="0" t="d" i="4">0</a:f>');
+  a(`          <a:f r="0" t="d" i="4">${size ? r4(size[0]) : 0}</a:f>`); a(`          <a:f r="0" t="d" i="4">${size ? r4(size[1]) : 0}</a:f>`);
   a('        </a:texture-size>');
   a('        <a:texture-asset id="1000010" t="c">');
   a('          <a:f r="0" t="i" i="1">33</a:f>'); a(`          <a:f r="0" t="i" i="1">${colorAid}</a:f>`); a('          <a:f r="0" t="i" i="1">0</a:f>');
@@ -602,6 +625,7 @@ async function readLibrary(path) {
     throw new Error(`"${path}" doesn't look like a PYTHA material library this tool understands (no materials/assets sections found).`);
   return {
     bom, crlf, xml, next: Math.max(...ids) + 1,
+    unit: ((xml.match(/<length>\s*([a-z]+)\s*<\/length>/i) || [])[1] || '').toLowerCase(),
     names: new Set([...xml.matchAll(/<material name="([^"]+)"/g)].map(m => m[1])),
     urls: [...xml.matchAll(/<source url="([^"]+)"/g)].map(m => m[1]),
   };
@@ -756,7 +780,12 @@ async function create() {
       const caid = nxt++; assets.push([caid, link(it.maps.color)]);
       let baid = null;
       if (it.bumpKind) { baid = nxt++; assets.push([baid, link(it.maps[it.bumpKind])]); }
-      mats.push(materialXml(name, nxt++, caid, baid, previews[i]));
+      let size = null;
+      if ($('tileSize').checked) {
+        const inch = sizeFromName(baseName(it.maps.color)), per = UNIT_PER_INCH[standalone ? 'inch' : (S.lib.unit || '?')];
+        if (inch && per) { size = inch.map(v => v * per); if (rotate) size.reverse(); }   // a 90 degree turn swaps the two sides
+      }
+      mats.push(materialXml(name, nxt++, caid, baid, previews[i], size));
     });
     const matText = mats.map(m => m.join('\n')).join('\n');
     let out, fileName, dir = S.texDir;
@@ -922,7 +951,7 @@ $('create').addEventListener('click', create);
 
 /* ---------- remembered settings (this browser only; page works the same if storage is blocked) */
 const PREF_KEY = 'pymatFromTextures.settings';
-const PREFS = { bumpPref: 'auto', strip: '', fullNames: false, rotate: false, thumbs: true, look: 'none', lookMatte: 0.8, lookSpec: 0, lookHi: 0.4, bumpAngle: 80 };
+const PREFS = { bumpPref: 'auto', strip: '', fullNames: false, rotate: false, tileSize: true, thumbs: true, look: 'none', lookMatte: 0.8, lookSpec: 0, lookHi: 0.4, bumpAngle: 80 };
 function savePrefs() {
   const o = {};
   for (const k in PREFS) o[k] = $(k).type === 'checkbox' ? $(k).checked : $(k).value;

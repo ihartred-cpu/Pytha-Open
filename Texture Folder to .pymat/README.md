@@ -25,7 +25,13 @@ The page sorts images by the word in their file name:
 | Roughness | roughness, rough | Bump slot (3rd choice) |
 | Normal, AO, metal | normal, nrm, ao, occlusion, metal... | Recognised so they are not mistaken for colour, then left out |
 
+Some vendors (Arroway, for one) end the file name with a single letter instead: `_d` colour, `_n` normal, `_b` bump, `_r` roughness, `_h` height. These are recognised too, and the letter wins over any map word earlier in the name, so a finish called "rough" is not mistaken for a roughness map. A trailing `-color2` on the colour file is ignored when pairing it with its other maps.
+
 Images in the same folder that share a name apart from that word are one set: `oak_basecolor.png` and `oak_roughness.png` become one material. A set needs a colour map to become a material. The *Bump slot uses* option changes the order of the three bump choices, and you can pick a different map (or none) per material in the list.
+
+**Tile size from names.** Vendor names often carry the real size of the image, such as `100x32cm`. With *Read tile size from names* ticked (the default), a name with a size and a unit (cm, mm, m or in) sets the material's tile size, so the texture repeats at true scale instead of leaving PYTHA's default. Sizes without a unit, such as `540 x 540`, are ignored. The first number is the image's width and the second its height; if *Rotate all images* is on, the two are swapped. Check the first material you make in PYTHA, because I have not been able to confirm how PYTHA applies the stored size.
+
+**Which word is the map type.** The map word nearest the end of the name wins, so `Aluminium_Metal_Sheet_Base_color` is a colour map, not a metalness map.
 
 Images with no map word in their name are handled by mode: *New library from a folder* treats each one as its own colour map (a vendor swatch), while *Add to an existing library* ignores them as previews or strays.
 
@@ -54,7 +60,7 @@ It applies to every material in the run and is remembered with your other settin
 ## Good to know
 - A folder called `textures` (or `maps`, `images`, ...) is named after the folder above it.
 - An unlabelled image next to a real colour map (a preview render such as `Metal009.png`) is listed but starts unticked.
-- Your settings (bump slot, name cleanup, full file names, rotate, thumbnails) are remembered in this browser for next time. **Reset settings** puts them back to the starting values.
+- Your settings (bump slot, name cleanup, full file names, rotate, tile size, thumbnails) are remembered in this browser for next time. **Reset settings** puts them back to the starting values.
 - **Cancel** (or press Esc) stops a run in progress. It takes effect between images, so a very large image finishes first. Nothing is saved, and a half-made `(rotated)` folder is removed again. Your originals are never touched.
 - Back up your library and close PYTHA before swapping a `_NEW` file in.
 - Links are relative: keep the `.pymat` and its textures together.
