@@ -1,3 +1,15 @@
+-- Group Numbering v1.7 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
+--   On V26 a group's bounding box also covers its reference points (connection, hinge and handle points), which stretched the box of
+--   cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option "Use the
+--   parts' own box (ignore reference points)", on by default; untick it for the 1.6 behaviour. The preview shows where reference
+--   points shifted a centre. A reference point sitting on a PART still counts: parts' boxes include theirs.
+--   Also: the group name is read back after it is set; if PYTHA ignored set_element_name the name attribute (3) is written directly,
+--   and the summary reports names that still did not stick.
+-- Group Numbering v1.6 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
+--   On V26 a group's bounding box also covers its reference points (connection points, hinge and handle points), which stretched the
+--   box of cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option
+--   "Use the parts' own box (ignore reference points)", on by default; untick it to get the 1.5 behaviour. The preview now shows when
+--   reference points shifted a centre. A reference point sitting on a PART still counts: parts' boxes include theirs.
 -- Group Numbering v1.5 (2026-10-15) - numbers follow each cabinet's FACING instead of always running along the x axis: the order is
 --   walked clockwise round the room (left wall, back wall, right wall, front wall), and inside a run it goes left to right as seen
 --   from the front of the cabinets. 3D labels sit on the front face and face the same way. The facing comes from pytha.get_group_angle
@@ -46,6 +58,7 @@ local DEFAULTS = {
 	facing = true,				--order and label by each group's facing (get_group_angle); false = the old left-to-right along x
 	flip_angle = false,			--if the preview shows the angles running the other way round, tick this
 	preview = false,			--list the order and the angles, change nothing
+	geometry_box = true,		--centres and labels from the box of the group's parts; false = the group's own box (includes reference points)
 }
 
 local function to_doc(v_mm)
@@ -143,6 +156,52 @@ local function bounding_box(g)
 	return nil
 end
 
+--the union of the boxes of the group's parts (get_group_descendants, element type "part"), or nil if none is readable. A group's own
+--box also covers its reference points, parts' boxes only cover reference points that sit on the part itself.
+local function parts_box(g)
+	local ok, members = pcall(function() return pytha.get_group_descendants(g) end)
+	if not ok or type(members) ~= "table" then return nil end
+	local lo, hi
+	for _, el in ipairs(members) do
+		local okt, kind = pcall(function() return pytha.get_element_type(el) end)
+		if okt and kind == "part" then
+			local pb = bounding_box(el)
+			if pb ~= nil then
+				if lo == nil then
+					lo = {pb[1][1], pb[1][2], pb[1][3]}
+					hi = {pb[2][1], pb[2][2], pb[2][3]}
+				else
+					for i = 1, 3 do
+						if pb[1][i] < lo[i] then lo[i] = pb[1][i] end
+						if pb[2][i] > hi[i] then hi[i] = pb[2][i] end
+					end
+				end
+			end
+		end
+	end
+	if lo == nil then return nil end
+	return {lo, hi}
+end
+
+--the box to measure a group by: the parts' box if wanted and readable, else the group's own. Second value: the group's own box.
+local function item_box(g, s)
+	local full = bounding_box(g)
+	if s ~= nil and s.geometry_box then
+		local pb = parts_box(g)
+		if pb ~= nil then return pb, full end
+	end
+	return full, full
+end
+
+--set a group name and check that it took: a call that raises no error is not proof (found 2026-10-15: v1.4 reported
+--8 names updated while the tree still showed "Base"); if the name did not change, write attribute 3 directly
+local function apply_name(g, name)
+	pcall(function() pytha.set_element_name(g, name) end)
+	if group_name(g) == name then return true end
+	pcall(function() pytha.set_element_attributes(g, {[3] = name}) end)
+	return group_name(g) == name
+end
+
 --the group's own rotation about its vertical axis, degrees, folded into (-180, 180]; nil if unreadable
 local function group_angle(g, flip)
 	local ok, a = pcall(function() return pytha.get_group_angle(g) end)
@@ -181,19 +240,20 @@ local function collect(s)
 				if cab ~= nil then
 					pcall(function() in_kitchen = (pytha.get_element_parent_group(cab) == g) end)
 				end
-				local bb = in_kitchen and bounding_box(cab) or nil
+				local bb, full
+				if in_kitchen then bb, full = item_box(cab, s) end
 				if bb ~= nil then
 					local tier = (spec.aux_values.row == WALL_ROW) and 2 or 1
-					table.insert(items, {group = cab, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = tier,
+					table.insert(items, {group = cab, bb = bb, full = full, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = tier,
 						ang = group_angle(cab, flip), pang = group_angle(g, flip)})
 				else
 					skipped = skipped + 1
 				end
 			end
 		else
-			local bb = bounding_box(g)
+			local bb, full = item_box(g, s)
 			if bb ~= nil then
-				table.insert(items, {group = g, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = 1,
+				table.insert(items, {group = g, bb = bb, full = full, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = 1,
 					ang = group_angle(g, flip)})
 			else
 				skipped = skipped + 1
@@ -228,7 +288,7 @@ local function collect(s)
 end
 
 function numbering_dialog(dialog, s)
-	dialog:set_window_title(pyloc "Group Numbering 1.5")
+	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, left to right. Existing numbers are kept.")
 
 	local renumber = dialog:create_check_box({1, 2}, pyloc "Renumber everything (restart at the start number)")
@@ -247,6 +307,10 @@ function numbering_dialog(dialog, s)
 	local facing = dialog:create_check_box({1, 2}, pyloc "Order by each cabinet's facing (runs along any wall); untick for left to right along x")
 	facing:set_control_checked(s.facing)
 	facing:set_on_click_handler(function(state) s.facing = state end)
+
+	local geo = dialog:create_check_box({1, 2}, pyloc "Use the parts' own box for centres and labels (ignores reference points; untick for the group's own box)")
+	geo:set_control_checked(s.geometry_box)
+	geo:set_on_click_handler(function(state) s.geometry_box = state end)
 
 	local flip = dialog:create_check_box({1, 2}, pyloc "Flip the angle sign (if the preview shows the rotation the other way round)")
 	flip:set_control_checked(s.flip_angle)
@@ -355,6 +419,15 @@ local function place_label(text, it, s)
 	return label
 end
 
+--preview note: how far the group's own box centre (reference points included) sits from the parts' box centre
+local function ref_shift_note(it)
+	if it.full == nil or it.bb == it.full then return "" end
+	local fx = (it.full[1][1] + it.full[2][1]) / 2 - it.cx
+	local fy = (it.full[1][2] + it.full[2][2]) / 2 - it.cy
+	if math.abs(fx) < 0.05 and math.abs(fy) < 0.05 then return "" end
+	return string.format("   (reference points would shift the centre by %.1f, %.1f)", fx, fy)
+end
+
 function number_groups()
 	local s = load_settings()
 	if pyui.run_modal_subdialog(numbering_dialog, s) ~= "ok" then
@@ -371,7 +444,7 @@ function number_groups()
 			local nm = group_name(it.group)
 			table.insert(rows, string.format("%d. %s   angle %s%s   centre %.0f, %.0f   %s", i, nm == "" and "(unnamed)" or nm,
 				it.ang and string.format("%.1f", it.ang) or "?", it.pang and string.format(" (kitchen %.1f)", it.pang) or "",
-				it.cx, it.cy, it.tier == 2 and "upper" or "base"))
+				it.cx, it.cy, it.tier == 2 and "upper" or "base") .. ref_shift_note(it))
 			if i >= 40 then table.insert(rows, "... " .. (#pitems - 40) .. " more"); break end
 		end
 		pyui.alert(table.concat(rows, "\n"))
@@ -413,16 +486,20 @@ function number_groups()
 	end
 
 	local failed, renamed, labels, label_errors = 0, 0, {}, 0
+	local rename_failed, rename_example = 0, nil
 	for _, it in ipairs(items) do
 		local n = it.number
 		if not pcall(function() pytha.set_element_attributes(it.group, {[46] = n}) end) then
 			failed = failed + 1
 		end
 		if s.rename then
-			local ok = pcall(function()
-				pytha.set_element_name(it.group, base_name(group_name(it.group)) .. NAME_SEPARATOR .. n)
-			end)
-			if ok then renamed = renamed + 1 end
+			local want = base_name(group_name(it.group)) .. NAME_SEPARATOR .. n
+			if apply_name(it.group, want) then
+				renamed = renamed + 1
+			else
+				rename_failed = rename_failed + 1
+				if rename_example == nil then rename_example = {want = want, got = group_name(it.group)} end
+			end
 		end
 		if s.labels then
 			local okl, label = pcall(function() return place_label(tostring(n), it, s) end)
@@ -448,7 +525,12 @@ function number_groups()
 	else
 		table.insert(msg, kept .. " kept their number, " .. assigned .. " got a new one.")
 	end
-	if s.rename then table.insert(msg, renamed .. " group name(s) updated (e.g. 'Base #3').") end
+	if s.rename then
+		table.insert(msg, renamed .. " group name(s) updated (e.g. 'Base #3').")
+		if rename_failed > 0 then
+			table.insert(msg, rename_failed .. " group name(s) did not stick: wanted '" .. rename_example.want .. "', PYTHA still has '" .. rename_example.got .. "'.")
+		end
+	end
 	if failed > 0 then table.insert(msg, "Could not write the position number on " .. failed .. " group(s).") end
 	if skipped > 0 then table.insert(msg, skipped .. " group(s) without geometry were skipped.") end
 	if s.labels then
@@ -483,7 +565,7 @@ local function launcher_actions()
 end
 
 local function launcher_dialog(dialog, st)
-	dialog:set_window_title(pyloc "Group Numbering 1.5")
+	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_label(1, pyloc "Action")
 	local list = dialog:create_drop_list(2)
 	for _, a in ipairs(st.actions) do

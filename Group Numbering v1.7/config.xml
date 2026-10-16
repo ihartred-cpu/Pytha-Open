@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
   <header>
-    <guid>62ff26d2-8d9b-4678-aec2-0eeca5058557</guid>
-    <version>1.5</version>
+    <guid>5a789735-479b-43d2-a58a-a83e12863e47</guid>
+    <version>1.7</version>
     <pytha-version>26.0</pytha-version>
     <name>Group Numbering</name>
     <description>Numbers every top-level group, and each cabinet inside a Kitchen Wizard kitchen - bases then uppers, left to right - keeps existing numbers, adds the number to the group name, optional 3D labels.</description>
