@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff srcLang="en-US" version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file original="config.xml">
+    <unit id="e1a2b3c4d5e60001">
+      <segment><source>Glyph Lab</source></segment>
+    </unit>
+    <unit id="e1a2b3c4d5e60002">
+      <segment><source>Test plugin: builds a smiley and a warning sign several ways (text, linework, extruded faces, booleans) and reports which Lua calls this PYTHA accepts.</source></segment>
+    </unit>
+    <unit id="e1a2b3c4d5e60007">
+      <segment><source>Build a smiley and a warning sign several ways and report which Lua calls work on this install.</source></segment>
+    </unit>
+  </file>
+</xliff>

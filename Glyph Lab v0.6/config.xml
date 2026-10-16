@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
+  <header>
+    <guid>b7d1c2e4-5a63-4f0e-9c28-3e6a1f4d7a91</guid>
+    <version>0.6</version>
+    <pytha-version>26.0</pytha-version>
+    <name>Glyph Lab</name>
+    <description>Test plugin: builds a smiley and a warning sign several ways (text, linework, extruded faces, booleans) and reports which Lua calls this PYTHA accepts.</description>
+    <licensing>MIT License.</licensing>
+  </header>
+  <extension type="function">
+    <entry-point>glyph_lab</entry-point>
+    <caption>Glyph Lab</caption>
+    <description>Build a smiley and a warning sign several ways and report which Lua calls work on this install.</description>
+  </extension>
+</plugin>

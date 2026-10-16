@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff srcLang="en-US" version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file original="config.xml">
+    <unit id="5b7d9e1f3a2c0001">
+      <segment><source>Sheet Kit (beta)</source></segment>
+    </unit>
+    <unit id="5b7d9e1f3a2c0002">
+      <segment><source>Beta. Makes a plot sheet with front, top and side views of the whole model, view labels and a title block, using only V26 sheet calls.</source></segment>
+    </unit>
+    <unit id="5b7d9e1f3a2c0003">
+      <segment><source>Lay out front, top and side views with labels and a title block on a new plot sheet.</source></segment>
+    </unit>
+  </file>
+</xliff>
