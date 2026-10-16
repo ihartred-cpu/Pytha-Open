@@ -1,3 +1,8 @@
+-- Group Numbering v1.5 (2026-10-15) - numbers follow each cabinet's FACING instead of always running along the x axis: the order is
+--   walked clockwise round the room (left wall, back wall, right wall, front wall), and inside a run it goes left to right as seen
+--   from the front of the cabinets. 3D labels sit on the front face and face the same way. The facing comes from pytha.get_group_angle
+--   (V26: the group's rotation about its own vertical axis, degrees; 0 = facing -y is ASSUMED, check with "Preview the order" first).
+--   New dialog options: order by facing (default on), flip the angle sign, preview only. Old x-axis order = untick "order by facing".
 -- Group Numbering v1.4 (2026-10-13) - ONE menu entry "Group Numbering" opens a picker (Number Groups / Remove number labels); PYTHA's
 --   plugin sidebar shows at most 21 entries in total, so each Group plugin now has a single entry. number_groups / remove_labels unchanged.
 -- Group Numbering v1.3 (2026-10-09) - label pen (colour) in the dialog; parts without a material show in their pen colour
@@ -38,6 +43,9 @@ local DEFAULTS = {
 	label_gap_mm = 50,			--above the top of the group
 	layer = 0,					--0 = active layer
 	pen = 0,					--0 = leave PYTHA's current pen; pick a red pen in the dialog to get red numbers
+	facing = true,				--order and label by each group's facing (get_group_angle); false = the old left-to-right along x
+	flip_angle = false,			--if the preview shows the angles running the other way round, tick this
+	preview = false,			--list the order and the angles, change nothing
 }
 
 local function to_doc(v_mm)
@@ -68,6 +76,7 @@ local function load_settings()
 		end
 	end
 	s.renumber_all = false		--never remembered: a full renumber must be asked for each time
+	s.preview = false			--never remembered either
 	s.pen_choice = nil
 	return s
 end
@@ -134,9 +143,28 @@ local function bounding_box(g)
 	return nil
 end
 
+--the group's own rotation about its vertical axis, degrees, folded into (-180, 180]; nil if unreadable
+local function group_angle(g, flip)
+	local ok, a = pcall(function() return pytha.get_group_angle(g) end)
+	a = ok and tonumber(a) or nil
+	if a == nil then return nil end
+	if flip then a = -a end
+	a = a % 360
+	if a > 180 then a = a - 360 end
+	return a
+end
+
+--the direction the cabinet faces, as a unit vector in plan: angle 0 faces -y (the old assumption), +90 turns it to face +x
+local function facing_vector(a)
+	local r = math.rad(a or 0)
+	return math.sin(r), -math.cos(r)
+end
+
 --every group to number: {group, bb, cx, tier (1 = bases, 2 = uppers)}
-local function collect()
+local function collect(s)
 	local items, skipped, kitchens = {}, 0, 0
+	local use_facing = s ~= nil and s.facing
+	local flip = s ~= nil and s.flip_angle
 	local top = {}
 	for g in pytha.enumerate_groups() do
 		if pytha.get_element_parent_group(g) == nil and group_name(g) ~= LABEL_GROUP_NAME then
@@ -156,7 +184,8 @@ local function collect()
 				local bb = in_kitchen and bounding_box(cab) or nil
 				if bb ~= nil then
 					local tier = (spec.aux_values.row == WALL_ROW) and 2 or 1
-					table.insert(items, {group = cab, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, tier = tier})
+					table.insert(items, {group = cab, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = tier,
+						ang = group_angle(cab, flip), pang = group_angle(g, flip)})
 				else
 					skipped = skipped + 1
 				end
@@ -164,11 +193,29 @@ local function collect()
 		else
 			local bb = bounding_box(g)
 			if bb ~= nil then
-				table.insert(items, {group = g, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, tier = 1})
+				table.insert(items, {group = g, bb = bb, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = 1,
+					ang = group_angle(g, flip)})
 			else
 				skipped = skipped + 1
 			end
 		end
+	end
+	if use_facing then
+		--bases first, then uppers. Within a tier: runs in clockwise order round the room (facing +x = left wall first, then facing -y =
+		--back wall, facing -x = right wall, facing +y = front wall), then left to right as seen from the front of the cabinets.
+		for _, it in ipairs(items) do
+			local a = it.ang or 0
+			it.run = math.floor(((90 - a) % 360) + 0.5) % 360
+			local r = math.rad(a)
+			it.along = it.cx * math.cos(r) + it.cy * math.sin(r)		--position along the cabinet's own left-to-right direction
+		end
+		table.sort(items, function(a, b)
+			if a.tier ~= b.tier then return a.tier < b.tier end
+			if a.run ~= b.run then return a.run < b.run end
+			if math.abs(a.along - b.along) > 1e-6 then return a.along < b.along end
+			return a.bb[1][3] < b.bb[1][3]
+		end)
+		return items, skipped, kitchens
 	end
 	--bases first, then uppers; each left to right by centre; ties front to back, then bottom to top
 	table.sort(items, function(a, b)
@@ -181,7 +228,7 @@ local function collect()
 end
 
 function numbering_dialog(dialog, s)
-	dialog:set_window_title(pyloc "Group Numbering 1.4")
+	dialog:set_window_title(pyloc "Group Numbering 1.5")
 	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, left to right. Existing numbers are kept.")
 
 	local renumber = dialog:create_check_box({1, 2}, pyloc "Renumber everything (restart at the start number)")
@@ -196,6 +243,18 @@ function numbering_dialog(dialog, s)
 			s.start = math.floor(n)
 		end
 	end)
+
+	local facing = dialog:create_check_box({1, 2}, pyloc "Order by each cabinet's facing (runs along any wall); untick for left to right along x")
+	facing:set_control_checked(s.facing)
+	facing:set_on_click_handler(function(state) s.facing = state end)
+
+	local flip = dialog:create_check_box({1, 2}, pyloc "Flip the angle sign (if the preview shows the rotation the other way round)")
+	flip:set_control_checked(s.flip_angle)
+	flip:set_on_click_handler(function(state) s.flip_angle = state end)
+
+	local preview = dialog:create_check_box({1, 2}, pyloc "Preview the order only (lists numbers and angles, changes nothing)")
+	preview:set_control_checked(s.preview)
+	preview:set_on_click_handler(function(state) s.preview = state end)
 
 	local rename = dialog:create_check_box({1, 2}, pyloc "Add the number to the group name (Base #3)")
 	rename:set_control_checked(s.rename)
@@ -263,21 +322,29 @@ function numbering_dialog(dialog, s)
 	dialog:equalize_column_widths({1, 2})
 end
 
-local function place_label(text, bb, s)
+local function place_label(text, it, s)
+	local bb = it.bb
 	local h = to_doc(s.label_height_mm)
 	local thickness = h / 10
-	local cx = (bb[1][1] + bb[2][1]) / 2
-	local origin = {cx, bb[1][2], bb[2][3] + to_doc(s.label_gap_mm)}
-	--upright, reading from the front: letters in the x-z plane, extruded toward -y
-	local token = pytha.push_local_coordinates(origin, {u_axis = {1, 0, 0}, v_axis = {0, 0, 1}, w_axis = {0, -1, 0}})
+	local ang = s.facing and (it.ang or 0) or 0
+	local r = math.rad(ang)
+	local ux, uy = math.cos(r), math.sin(r)				--left to right as seen from the front
+	local fx, fy = facing_vector(ang)					--the direction the front looks
+	local cx, cy = (bb[1][1] + bb[2][1]) / 2, (bb[1][2] + bb[2][2]) / 2
+	local dx, dy = bb[2][1] - bb[1][1], bb[2][2] - bb[1][2]
+	local half_depth = (math.abs(fx) * dx + math.abs(fy) * dy) / 2		--front face of the box, along the facing direction
+	local origin = {cx + fx * half_depth, cy + fy * half_depth, bb[2][3] + to_doc(s.label_gap_mm)}
+	--upright, reading from the front: letters in the plane across the cabinet, extruded away from the front
+	local token = pytha.push_local_coordinates(origin, {u_axis = {ux, uy, 0}, v_axis = {0, 0, 1}, w_axis = {fx, fy, 0}})
 	local ok, label = pcall(function() return pytha.create_text_3d(text, h, thickness) end)
 	pytha.pop_local_coordinates(token)
 	if not ok then
 		error(label)
 	end
-	--create_text_3d starts the text at the origin; centre it over the group
+	--create_text_3d starts the text at the origin; centre it over the group along the left-to-right direction
 	local lb = pytha.get_element_bounding_box(label)
-	pytha.move_element(label, {cx - (lb[1][1] + lb[2][1]) / 2, 0, 0})
+	local width = math.abs(ux) * (lb[2][1] - lb[1][1]) + math.abs(uy) * (lb[2][2] - lb[1][2])
+	pytha.move_element(label, {-ux * width / 2, -uy * width / 2, 0})
 	pytha.set_element_name(label, LABEL_PREFIX .. text)
 	if s.layer > 0 then
 		pytha.set_element_layer(label, s.layer)
@@ -297,8 +364,22 @@ function number_groups()
 	s.pen_choice = nil
 	pyio.save_values("numbering_settings", s)
 
+	if s.preview then
+		local pitems = collect(s)
+		local rows = {pyloc "Group Numbering - preview (nothing changed)", "unit " .. pytha.get_length_unit() .. "; facing " .. (s.facing and "on" or "off") .. (s.flip_angle and ", angle flipped" or ""), ""}
+		for i, it in ipairs(pitems) do
+			local nm = group_name(it.group)
+			table.insert(rows, string.format("%d. %s   angle %s%s   centre %.0f, %.0f   %s", i, nm == "" and "(unnamed)" or nm,
+				it.ang and string.format("%.1f", it.ang) or "?", it.pang and string.format(" (kitchen %.1f)", it.pang) or "",
+				it.cx, it.cy, it.tier == 2 and "upper" or "base"))
+			if i >= 40 then table.insert(rows, "... " .. (#pitems - 40) .. " more"); break end
+		end
+		pyui.alert(table.concat(rows, "\n"))
+		pcall(function() pyio.write_lines(pyio.get_scratch_folder_path("group_numbering_preview.txt"), rows) end)
+		return
+	end
 	local removed = delete_labels()
-	local items, skipped, kitchens = collect()
+	local items, skipped, kitchens = collect(s)
 	if #items == 0 then
 		pyui.alert(pyloc "Group Numbering: nothing to number (no cabinets or top-level groups found).")
 		return
@@ -344,7 +425,7 @@ function number_groups()
 			if ok then renamed = renamed + 1 end
 		end
 		if s.labels then
-			local okl, label = pcall(function() return place_label(tostring(n), it.bb, s) end)
+			local okl, label = pcall(function() return place_label(tostring(n), it, s) end)
 			if okl and label ~= nil then
 				table.insert(labels, label)
 			else
@@ -402,7 +483,7 @@ local function launcher_actions()
 end
 
 local function launcher_dialog(dialog, st)
-	dialog:set_window_title(pyloc "Group Numbering 1.4")
+	dialog:set_window_title(pyloc "Group Numbering 1.5")
 	dialog:create_label(1, pyloc "Action")
 	local list = dialog:create_drop_list(2)
 	for _, a in ipairs(st.actions) do

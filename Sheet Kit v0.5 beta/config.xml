@@ -2,7 +2,7 @@
 <plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
   <header>
     <guid>3c5e8a17-92d4-4b6f-8e01-7a2d9c4f1b58</guid>
-    <version>0.2</version>
+    <version>0.5</version>
     <pytha-version>26.0</pytha-version>
     <name>Sheet Kit (beta)</name>
     <description>Beta. Makes a plot sheet with front, top and side views of the whole model, view labels and a title block, using only V26 sheet calls.</description>
