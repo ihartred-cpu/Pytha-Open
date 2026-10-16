@@ -31,7 +31,7 @@
 local LABEL_GROUP_NAME = "Group Numbers"		--all labels live in this one top-level group, never inside the numbered groups
 local LABEL_PREFIX = "Group No. "
 local NAME_SEPARATOR = " #"					--"Base" -> "Base #3"
-local WIZARD_HISTORY_KEYS = {"wizard_history", "Group_cabinet_wizard_history"}	--KWGUID build / standalone build
+local WIZARD_HISTORY_KEYS = {"wizard_history"}	--Kitchen Wizard's element-history key
 local WALL_ROW = 0x2						--Kitchen Wizard row code for wall cabinets
 
 local DEFAULTS = {

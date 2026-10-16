@@ -7,6 +7,8 @@ PYTHA plugin (V26). Numbers every top-level group in the model, left to right, s
 - **Order:** bases first (Kitchen Wizard base and tall cabinets, plus every other top-level group), then uppers (Kitchen Wizard wall cabinets).
 - **Facing (new in 1.5):** each cabinet is ordered by the way it faces, not just along the x axis. Runs are walked clockwise round the room (left wall, back wall, right wall, front wall, as seen from above), and inside a run the numbers go left to right as seen from the front of the cabinets. The 3D labels sit on the front face and read from the front. The facing comes from `pytha.get_group_angle` (V26), assuming angle 0 faces -y. Untick "Order by each cabinet's facing" for the old left-to-right-along-x order.
 
+![Red 3D number labels above each cabinet of a Kitchen Wizard L-shaped kitchen](images/group-numbering-labels.png)
+
 What each number does:
 - It is written to the group's position number, so the Parts List can show it.
 - It is appended to the group name ("Base" becomes "Base #3").
