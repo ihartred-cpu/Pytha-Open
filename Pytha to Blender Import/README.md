@@ -26,3 +26,12 @@ PYTHA's glTF export drops layers and pens, and Blender's own importer turns the 
 - Optional: swap in materials from a library `.blend` by matching name, merge vertices by distance, and mark hard edges as UV seams.
 
 Diagnostic output: *Window > Toggle System Console* (Windows).
+
+## Where to find the results in Blender
+![Outliner and custom properties after import](images/blender-outliner-and-custom-properties.png)
+
+- **Outliner:** PYTHA's group tree (here Kitchen > Base > Carcass / Externals > Drawer_1 ...) is a nested collection tree, with part names exactly as in PYTHA. If the layer and pen collections are enabled in the import dialog, `Layers /` and `Pens /` collections are added alongside.
+- **Properties editor > Object tab > Custom Properties:** `pytha_name`, `pytha_layer`, `pytha_layer_name` and `pytha_pen` for the selected part.
+
+## Tested
+Blender 5.2 with a glTF exported from PYTHA V26 (a Kitchen Wizard kitchen: 104 parts in 43 groups). All 104 parts were tagged and the importer found the tags. That model had a single layer, and only one part's pen (1) was inspected, so a model with several layers and pens still needs checking.
