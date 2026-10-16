@@ -14,15 +14,16 @@ PYTHA's glTF export drops layers and pens, and Blender's own importer turns the 
 - **Blender:** *Edit > Preferences > Add-ons > Install from Disk*, pick `pytha_gltf_importer.py`, and enable it.
 
 ## How to use
-1. In PYTHA, run **Export tags (tag / untag)**. Each part name gets a tag like `{L<layer>:<layer name> P<pen>}`.
+1. In PYTHA, run **Export tags (tag / untag)**. Each part name gets a temporary tag like `{L<layer>:<layer name> P<pen>}`; it only exists in PYTHA until step 3 and in the exported file.
 2. Export glTF/GLB from PYTHA.
 3. Run **Export tags (tag / untag)** again. It sees the tags and removes them, restoring the original part names.
 4. In Blender: *File > Import > PYTHA (.glb/.gltf)*, set the options and import.
 
 ## What the importer gives you
 - PYTHA's group tree as nested collections.
-- Part names kept exactly (also stored in the `pytha_name` custom property).
+- Part names kept exactly (also stored in the `pytha_name` custom property). The tag is removed on import, so names in Blender stay clean and the layer and pen are not in the name: look in Custom Properties, the `Pens /` collections or the `Pen <n>` materials instead.
 - Layers and pens as custom properties (`pytha_layer`, `pytha_layer_name`, `pytha_pen`) and as `Layers /` and `Pens /` collections, so you can browse by group or by layer.
+- Pen colours: a part with no material of its own arrives from PYTHA with a material named `Pen <n>` carrying the pen's colour, and the importer keeps it (and reads the pen number from the name, even without tags). A part with its own material keeps that material; its pen comes only from the tag.
 - Optional: swap in materials from a library `.blend` by matching name, merge vertices by distance, and mark hard edges as UV seams.
 
 Diagnostic output: *Window > Toggle System Console* (Windows).
@@ -34,4 +35,4 @@ Diagnostic output: *Window > Toggle System Console* (Windows).
 - **Properties editor > Object tab > Custom Properties:** `pytha_name`, `pytha_layer`, `pytha_layer_name` and `pytha_pen` for the selected part.
 
 ## Tested
-Blender 5.2 with a glTF exported from PYTHA V26 (a Kitchen Wizard kitchen: 104 parts in 43 groups). All 104 parts were tagged and the importer found the tags. That model had a single layer, and only one part's pen (1) was inspected, so a model with several layers and pens still needs checking.
+Blender 5.2 with a glTF exported from PYTHA V26 (a Kitchen Wizard kitchen: 104 parts in 43 groups). All 104 parts were tagged and the importer found the tags. That model had a single layer, and only one part's pen (1) was inspected; its pen colour came through on the `Pen 1` material. A model with several layers and pens still needs checking.
