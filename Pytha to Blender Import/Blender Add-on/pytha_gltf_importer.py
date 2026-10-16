@@ -13,7 +13,7 @@
 #     here every object also gets the exact name in custom property
 #     "pytha_name".
 #   * Layers and pens: PYTHA's glTF export drops them. Run the BCW Export
-#     Tags plugin in PYTHA ("Tag parts for export") before exporting; the
+#     Tags plugin in PYTHA ("Export tags") before exporting; the
 #     tag it adds to each part name, " {L<layer>:<layer name> P<pen>}", is
 #     read here, removed from the name, stored as custom properties
 #     "pytha_layer", "pytha_layer_name", "pytha_pen", and each part is ALSO
@@ -283,7 +283,7 @@ class PythaImport:
                 cols[p].objects.link(ob)
             self.stats["pens"] = len(cols)
         if not tagged:
-            _log("no layer/pen tags found - run 'Tag parts for export' (BCW Export Tags) in PYTHA before exporting to get layers")
+            _log("no layer/pen tags found - run 'Export tags' (BCW Export Tags) in PYTHA before exporting to get layers")
 
     def _swap_materials(self, lib_path):
         lib_path = bpy.path.abspath(lib_path)

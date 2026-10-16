@@ -4,19 +4,19 @@ Two parts that work together to bring a PYTHA model into Blender intact:
 
 | Folder | Runs in | Does |
 |---|---|---|
-| `Export Tags v1.0/` | PYTHA V26 (plugin) | Saves each part's layer and pen into its name before export, then removes them again |
+| `Export Tags v1.1/` | PYTHA V26 (plugin) | One command: saves each part's layer and pen into its name before export, and removes them again on the second run |
 | `Blender Add-on/pytha_gltf_importer.py` | Blender 4.2+ / 5.x | Imports the glTF/GLB with the group tree, exact names, layers and pens |
 
 PYTHA's glTF export drops layers and pens, and Blender's own importer turns the group tree into 100+ empties and mangles names like `0948_L204,H27,W18.5`. Together these fix that.
 
 ## Install
-- **PYTHA:** copy the whole `Export Tags v1.0` folder into PYTHA's plugin directory (`%AppData%\PYTHA26.0\plugins`), keeping the folder itself, and restart PYTHA.
+- **PYTHA:** copy the whole `Export Tags v1.1` folder into PYTHA's plugin directory (`%AppData%\PYTHA26.0\plugins`), keeping the folder itself, and restart PYTHA.
 - **Blender:** *Edit > Preferences > Add-ons > Install from Disk*, pick `pytha_gltf_importer.py`, and enable it.
 
 ## How to use
-1. In PYTHA, run **Tag parts for export**. Each part name gets a tag like `{L<layer>:<layer name> P<pen>}`.
+1. In PYTHA, run **Export tags (tag / untag)**. Each part name gets a tag like `{L<layer>:<layer name> P<pen>}`.
 2. Export glTF/GLB from PYTHA.
-3. Run **Remove export tags** to restore the original part names.
+3. Run **Export tags (tag / untag)** again. It sees the tags and removes them, restoring the original part names.
 4. In Blender: *File > Import > PYTHA (.glb/.gltf)*, set the options and import.
 
 ## What the importer gives you
