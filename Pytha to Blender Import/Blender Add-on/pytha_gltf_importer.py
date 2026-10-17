@@ -336,7 +336,7 @@ class PythaImport:
             bm = bmesh.new()
             bm.from_mesh(ob.data)
             for e in bm.edges:
-                if len(e.link_faces) == 2 and e.calc_face_angle() > angle_limit:
+                if len(e.link_faces) == 2 and e.calc_face_angle(0.0) > angle_limit:
                     e.seam = True
                     n += 1
             bm.to_mesh(ob.data)

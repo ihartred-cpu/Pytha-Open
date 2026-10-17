@@ -5,12 +5,12 @@
     <version>1.7</version>
     <pytha-version>26.0</pytha-version>
     <name>Group Numbering</name>
-    <description>Numbers every top-level group, and each cabinet inside a Kitchen Wizard kitchen - bases then uppers, left to right - keeps existing numbers, adds the number to the group name, optional 3D labels.</description>
+    <description>Numbers every top-level group, and each cabinet inside a Kitchen Wizard kitchen - bases then uppers, in order round the room - keeps existing numbers, adds the number to the group name, optional 3D labels.</description>
     <licensing>MIT License.</licensing>
   </header>
   <extension type="function">
     <entry-point>numbering_launcher</entry-point>
     <caption>Group Numbering</caption>
-    <description>Number top-level groups and Kitchen Wizard cabinets left to right, or remove the 3D number labels. Opens a short list of actions.</description>
+    <description>Number top-level groups and Kitchen Wizard cabinets in order round the room, or remove the 3D number labels. Opens a short list of actions.</description>
   </extension>
 </plugin>

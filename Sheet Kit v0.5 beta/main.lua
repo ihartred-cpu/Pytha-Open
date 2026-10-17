@@ -1,4 +1,4 @@
--- Sheet Kit v0.5 BETA (2026-10-15) - lays out front / top / side views of the whole model on a NEW plot sheet,
+-- Sheet Kit v0.5 BETA (2026-10-15) - lays out front / top / side views of the model (or the groups you pick) on a NEW plot sheet,
 -- with view labels and a title block (title, sheet number, scale, date). Built only from calls that Glyph Lab 0.5/0.6
 -- showed working on PYTHA V26 (compiled 2026-07-20 14:19:45): pyplot.create_sheet / insert_detail / insert_text.
 --
@@ -16,7 +16,7 @@ local PAPERS = {
 }
 local AREA, GAP_IN, TF = PAPERS.archd.area, PAPERS.archd.gap, PAPERS.archd.f	--set from the dialog before drawing
 local SKIP_GROUPS = {["Group Numbers"] = true, ["Glyph Lab"] = true}
---US architectural scales: inches on the sheet per foot of model -> ratio = 12 / that. Smallest drawn scale is 1/2" = 1'-0".
+--US architectural scales: inches on the sheet per foot of model -> ratio = 12 / that. Smallest drawn scale is 1/8" = 1'-0".
 local SCALES = {
 	{ipf = 0.125, name = "1/8"}, {ipf = 0.1875, name = "3/16"}, {ipf = 0.25, name = "1/4"}, {ipf = 0.375, name = "3/8"},
 	{ipf = 0.5, name = "1/2"}, {ipf = 0.75, name = "3/4"}, {ipf = 1, name = "1"}, {ipf = 1.5, name = "1-1/2"},
@@ -148,7 +148,7 @@ function SheetKit.pick_groups(levels)
 	local out = {}
 	for _, el in ipairs(sel) do
 		local g = el
-		local okt, t = pcall(function() return el:get_element_type() end)
+		local okt, t = pcall(function() return pytha.get_element_type(el) end)
 		if not (okt and t == "group") then
 			local p = pytha.get_element_parent_group(el)
 			if p ~= nil then g = p end
@@ -227,7 +227,7 @@ end
 ----------------------------------------------------------------------------------------------------------------
 local function dialog_fn(dialog, s)
 	dialog:set_window_title(pyloc "Sheet Kit 0.5 (beta)")
-	dialog:create_standalone_label({1, 2}, pyloc "Makes a new plot sheet with front, top and side views of the whole model, view labels and a title block.")
+	dialog:create_standalone_label({1, 2}, pyloc "Makes a new plot sheet with front, top and side views of the model (or the groups you pick), view labels and a title block.")
 	dialog:create_label(1, pyloc "Sheet name")
 	local nm = dialog:create_text_box(2, s.sheet_name)
 	nm:set_on_change_handler(function(text) if text ~= "" then s.sheet_name = text end end)
@@ -323,7 +323,7 @@ function sheet_kit()
 		return
 	end
 	local res = made[1]
-	pyui.alert(string.format("Sheet '%s' made from %d top-level group(s), scale %s.\nViews: %s.%s",
+	pyui.alert(string.format("Sheet '%s' made from %d group(s), scale %s.\nViews: %s.%s",
 		res.name, res.groups, res.scale, table.concat(res.views, ", "),
-		res.fits and "" or "\n\nWARNING: the views do not fit the drawing area at this scale and will overlap or run past the frame. Use a smaller scale, or leave the scale blank for auto (smallest offered is 1/2\" = 1'-0\")."))
+		res.fits and "" or "\n\nWARNING: the views do not fit the drawing area at this scale and will overlap or run past the frame. Use a smaller scale, or leave the scale blank for auto (smallest offered is 1/8\" = 1'-0\")."))
 end

@@ -430,11 +430,15 @@ function glyph_lab()
 
 	results, made = {}, {}
 	-- a re-run replaces the old test group
+	local old_groups = {}		--collect first: deleting while enumerate_groups is still looping can skip groups
 	for g in pytha.enumerate_groups() do
 		local ok_n, n = pcall(function() return pytha.get_element_attribute(g, 3) end)
 		if ok_n and tostring(n) == GROUP_NAME and pytha.get_element_parent_group(g) == nil then
-			pcall(function() pytha.delete_element(g) end)
+			table.insert(old_groups, g)
 		end
+	end
+	for _, g in ipairs(old_groups) do
+		pcall(function() pytha.delete_element(g) end)
 	end
 	local ok_run, err = pcall(run, s)
 	if not ok_run then record("run aborted", false, err) end

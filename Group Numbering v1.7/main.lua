@@ -3,7 +3,9 @@
 --   cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option "Use the
 --   parts' own box (ignore reference points)", on by default; untick it for the 1.6 behaviour. The preview shows where reference
 --   points shifted a centre. A reference point sitting on a PART still counts: parts' boxes include theirs.
---   Also: the group name is read back after it is set; if PYTHA ignored set_element_name the name attribute (3) is written directly,
+--   Also: a label whose later steps fail is deleted instead of left in the model; error text no longer gets a second location prefix;
+--   menu and description texts no longer say plain "left to right" (the order follows each cabinet's facing).
+--   The group name is read back after it is set; if PYTHA ignored set_element_name the name attribute (3) is written directly,
 --   and the summary reports names that still did not stick.
 -- Group Numbering v1.6 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
 --   On V26 a group's bounding box also covers its reference points (connection points, hinge and handle points), which stretched the
@@ -289,7 +291,7 @@ end
 
 function numbering_dialog(dialog, s)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
-	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, left to right. Existing numbers are kept.")
+	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, in order round the room (by facing). Existing numbers are kept.")
 
 	local renumber = dialog:create_check_box({1, 2}, pyloc "Renumber everything (restart at the start number)")
 	renumber:set_control_checked(s.renumber_all)
@@ -403,18 +405,25 @@ local function place_label(text, it, s)
 	local ok, label = pcall(function() return pytha.create_text_3d(text, h, thickness) end)
 	pytha.pop_local_coordinates(token)
 	if not ok then
-		error(label)
+		error(label, 0)
 	end
-	--create_text_3d starts the text at the origin; centre it over the group along the left-to-right direction
-	local lb = pytha.get_element_bounding_box(label)
-	local width = math.abs(ux) * (lb[2][1] - lb[1][1]) + math.abs(uy) * (lb[2][2] - lb[1][2])
-	pytha.move_element(label, {-ux * width / 2, -uy * width / 2, 0})
-	pytha.set_element_name(label, LABEL_PREFIX .. text)
-	if s.layer > 0 then
-		pytha.set_element_layer(label, s.layer)
-	end
-	if s.pen > 0 then
-		pytha.set_element_pen(label, s.pen)	--a part with no material shows in its pen colour
+	--the text now exists in the model: if any step below fails, delete it so no stray label is left behind
+	local okp, perr = pcall(function()
+		--create_text_3d starts the text at the origin; centre it over the group along the left-to-right direction
+		local lb = pytha.get_element_bounding_box(label)
+		local width = math.abs(ux) * (lb[2][1] - lb[1][1]) + math.abs(uy) * (lb[2][2] - lb[1][2])
+		pytha.move_element(label, {-ux * width / 2, -uy * width / 2, 0})
+		pytha.set_element_name(label, LABEL_PREFIX .. text)
+		if s.layer > 0 then
+			pytha.set_element_layer(label, s.layer)
+		end
+		if s.pen > 0 then
+			pytha.set_element_pen(label, s.pen)	--a part with no material shows in its pen colour
+		end
+	end)
+	if not okp then
+		pcall(pytha.delete_element, label)
+		error(perr, 0)
 	end
 	return label
 end
@@ -559,7 +568,7 @@ local LAUNCHER_STORE = "Group_numbering_launcher"
 
 local function launcher_actions()
 	return {
-		{pyloc "Number Groups", number_groups, pyloc "Number every top-level group left to right and (optionally) label it. Run again after any change - old labels are replaced."},
+		{pyloc "Number Groups", number_groups, pyloc "Number every top-level group in order round the room and (optionally) label it. Run again after any change - old labels are replaced."},
 		{pyloc "Remove number labels", remove_labels, pyloc "Delete the 3D number labels. Position numbers stay on the groups."},
 	}
 end

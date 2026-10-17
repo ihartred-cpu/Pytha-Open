@@ -1,6 +1,6 @@
 # Group Numbering v1.7
 
-PYTHA plugin (V26). Numbers every top-level group in the model, left to right, so each one carries a number through to the Parts List.
+PYTHA plugin (V26). Numbers every top-level group in the model, in order round the room (left to right along each run), so each one carries a number through to the Parts List.
 
 - **Any top-level group** counts as one item, whatever made it.
 - **Kitchen Wizard kitchens** are the exception: each cabinet inside the kitchen gets its own number, not the kitchen as a whole (its Benchtop and Kickboard groups are skipped).

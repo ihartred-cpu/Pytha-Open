@@ -5,10 +5,10 @@
       <segment><source>Group Numbering</source></segment>
     </unit>
     <unit id="e1a2b3c4d5e60002">
-      <segment><source>Numbers every top-level group, and each cabinet inside a Kitchen Wizard kitchen - bases then uppers, left to right - keeps existing numbers, adds the number to the group name, optional 3D labels.</source></segment>
+      <segment><source>Numbers every top-level group, and each cabinet inside a Kitchen Wizard kitchen - bases then uppers, in order round the room - keeps existing numbers, adds the number to the group name, optional 3D labels.</source></segment>
     </unit>
     <unit id="e1a2b3c4d5e60007">
-      <segment><source>Number top-level groups and Kitchen Wizard cabinets left to right, or remove the 3D number labels. Opens a short list of actions.</source></segment>
+      <segment><source>Number top-level groups and Kitchen Wizard cabinets in order round the room, or remove the 3D number labels. Opens a short list of actions.</source></segment>
     </unit>
   </file>
 </xliff>
