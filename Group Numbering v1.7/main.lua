@@ -7,6 +7,7 @@
 --   menu and description texts no longer say plain "left to right" (the order follows each cabinet's facing).
 --   The group name is read back after it is set; if PYTHA ignored set_element_name the name attribute (3) is written directly,
 --   and the summary reports names that still did not stick.
+--   Variable names were made readable (settings, entry, box, part_box, centre_x ...); behaviour is unchanged.
 -- Group Numbering v1.6 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
 --   On V26 a group's bounding box also covers its reference points (connection points, hinge and handle points), which stretched the
 --   box of cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option
@@ -78,28 +79,28 @@ local function to_mm(v_doc)
 end
 
 local function load_settings()
-	local s = {}
-	for k, v in pairs(DEFAULTS) do
-		s[k] = v
+	local settings = {}
+	for key, value in pairs(DEFAULTS) do
+		settings[key] = value
 	end
 	local saved = pyio.load_values("numbering_settings")
 	if type(saved) == "table" then
-		for k, v in pairs(saved) do
-			if DEFAULTS[k] ~= nil and type(v) == type(DEFAULTS[k]) then
-				s[k] = v
+		for key, value in pairs(saved) do
+			if DEFAULTS[key] ~= nil and type(value) == type(DEFAULTS[key]) then
+				settings[key] = value
 			end
 		end
 	end
-	s.renumber_all = false		--never remembered: a full renumber must be asked for each time
-	s.preview = false			--never remembered either
-	s.pen_choice = nil
-	return s
+	settings.renumber_all = false		--never remembered: a full renumber must be asked for each time
+	settings.preview = false			--never remembered either
+	settings.pen_choice = nil
+	return settings
 end
 
-local function group_name(g)
-	local ok, n = pcall(function() return pytha.get_element_attribute(g, 3) end)
-	if ok and n ~= nil then
-		return tostring(n)
+local function group_name(group)
+	local call_ok, name_value = pcall(function() return pytha.get_element_attribute(group, 3) end)
+	if call_ok and name_value ~= nil then
+		return tostring(name_value)
 	end
 	return ""
 end
@@ -109,23 +110,23 @@ local function base_name(name)
 	return (name:gsub(" #%d+$", ""))
 end
 
-local function existing_number(g)
-	local ok, v = pcall(function() return pytha.get_element_attribute(g, 46) end)
-	if not ok or v == nil then
+local function existing_number(group)
+	local call_ok, raw_number = pcall(function() return pytha.get_element_attribute(group, 46) end)
+	if not call_ok or raw_number == nil then
 		return nil
 	end
-	local n = tonumber(v)
-	if n ~= nil and n >= 1 and n == math.floor(n) then
-		return math.floor(n)		--integer: PYTHA hands attributes back as text, e.g. "40.0" -> 40, never "Base #40.0"
+	local number = tonumber(raw_number)
+	if number ~= nil and number >= 1 and number == math.floor(number) then
+		return math.floor(number)		--integer: PYTHA hands attributes back as text, e.g. "40.0" -> 40, never "Base #40.0"
 	end
 	return nil
 end
 
 local function find_label_groups()
 	local found = {}
-	for g in pytha.enumerate_groups() do
-		if pytha.get_element_parent_group(g) == nil and group_name(g) == LABEL_GROUP_NAME then
-			table.insert(found, g)
+	for group in pytha.enumerate_groups() do
+		if pytha.get_element_parent_group(group) == nil and group_name(group) == LABEL_GROUP_NAME then
+			table.insert(found, group)
 		end
 	end
 	return found
@@ -140,123 +141,124 @@ local function delete_labels()
 end
 
 --the wizard's own data on a kitchen group, or nil for any other group
-local function wizard_data(g)
+local function wizard_data(group)
 	for _, key in ipairs(WIZARD_HISTORY_KEYS) do
-		local ok, data = pcall(function() return pytha.get_element_history(g, key) end)
-		if ok and type(data) == "table" and type(data.aux_values) == "table" and type(data.aux_values.cabinet_list) == "table" then
+		local call_ok, data = pcall(function() return pytha.get_element_history(group, key) end)
+		if call_ok and type(data) == "table" and type(data.aux_values) == "table" and type(data.aux_values.cabinet_list) == "table" then
 			return data
 		end
 	end
 	return nil
 end
 
-local function bounding_box(g)
-	local ok, bb = pcall(function() return pytha.get_element_bounding_box(g) end)
-	if ok and type(bb) == "table" and bb[1] ~= nil and bb[2] ~= nil then
-		return bb
+local function bounding_box(group)
+	local call_ok, box = pcall(function() return pytha.get_element_bounding_box(group) end)
+	if call_ok and type(box) == "table" and box[1] ~= nil and box[2] ~= nil then
+		return box
 	end
 	return nil
 end
 
 --the union of the boxes of the group's parts (get_group_descendants, element type "part"), or nil if none is readable. A group's own
 --box also covers its reference points, parts' boxes only cover reference points that sit on the part itself.
-local function parts_box(g)
-	local ok, members = pcall(function() return pytha.get_group_descendants(g) end)
-	if not ok or type(members) ~= "table" then return nil end
-	local lo, hi
-	for _, el in ipairs(members) do
-		local okt, kind = pcall(function() return pytha.get_element_type(el) end)
-		if okt and kind == "part" then
-			local pb = bounding_box(el)
-			if pb ~= nil then
-				if lo == nil then
-					lo = {pb[1][1], pb[1][2], pb[1][3]}
-					hi = {pb[2][1], pb[2][2], pb[2][3]}
+local function parts_box(group)
+	local call_ok, members = pcall(function() return pytha.get_group_descendants(group) end)
+	if not call_ok or type(members) ~= "table" then return nil end
+	local box_min, box_max
+	for _, element in ipairs(members) do
+		local ok_type, kind = pcall(function() return pytha.get_element_type(element) end)
+		if ok_type and kind == "part" then
+			local part_box = bounding_box(element)
+			if part_box ~= nil then
+				if box_min == nil then
+					box_min = {part_box[1][1], part_box[1][2], part_box[1][3]}
+					box_max = {part_box[2][1], part_box[2][2], part_box[2][3]}
 				else
-					for i = 1, 3 do
-						if pb[1][i] < lo[i] then lo[i] = pb[1][i] end
-						if pb[2][i] > hi[i] then hi[i] = pb[2][i] end
+					for axis = 1, 3 do
+						if part_box[1][axis] < box_min[axis] then box_min[axis] = part_box[1][axis] end
+						if part_box[2][axis] > box_max[axis] then box_max[axis] = part_box[2][axis] end
 					end
 				end
 			end
 		end
 	end
-	if lo == nil then return nil end
-	return {lo, hi}
+	if box_min == nil then return nil end
+	return {box_min, box_max}
 end
 
 --the box to measure a group by: the parts' box if wanted and readable, else the group's own. Second value: the group's own box.
-local function item_box(g, s)
-	local full = bounding_box(g)
-	if s ~= nil and s.geometry_box then
-		local pb = parts_box(g)
-		if pb ~= nil then return pb, full end
+local function item_box(group, settings)
+	local full = bounding_box(group)
+	if settings ~= nil and settings.geometry_box then
+		local part_box = parts_box(group)
+		if part_box ~= nil then return part_box, full end
 	end
 	return full, full
 end
 
 --set a group name and check that it took: a call that raises no error is not proof (found 2026-10-15: v1.4 reported
 --8 names updated while the tree still showed "Base"); if the name did not change, write attribute 3 directly
-local function apply_name(g, name)
-	pcall(function() pytha.set_element_name(g, name) end)
-	if group_name(g) == name then return true end
-	pcall(function() pytha.set_element_attributes(g, {[3] = name}) end)
-	return group_name(g) == name
+local function apply_name(group, name)
+	pcall(function() pytha.set_element_name(group, name) end)
+	if group_name(group) == name then return true end
+	pcall(function() pytha.set_element_attributes(group, {[3] = name}) end)
+	return group_name(group) == name
 end
 
 --the group's own rotation about its vertical axis, degrees, folded into (-180, 180]; nil if unreadable
-local function group_angle(g, flip)
-	local ok, a = pcall(function() return pytha.get_group_angle(g) end)
-	a = ok and tonumber(a) or nil
-	if a == nil then return nil end
-	if flip then a = -a end
-	a = a % 360
-	if a > 180 then a = a - 360 end
-	return a
+local function group_angle(group, flip)
+	local call_ok, angle = pcall(function() return pytha.get_group_angle(group) end)
+	angle = call_ok and tonumber(angle) or nil
+	if angle == nil then return nil end
+	if flip then angle = -angle end
+	angle = angle % 360
+	if angle > 180 then angle = angle - 360 end
+	return angle
 end
 
 --the direction the cabinet faces, as a unit vector in plan: angle 0 faces -y (the old assumption), +90 turns it to face +x
-local function facing_vector(a)
-	local r = math.rad(a or 0)
-	return math.sin(r), -math.cos(r)
+local function facing_vector(angle_deg)
+	local angle_rad = math.rad(angle_deg or 0)
+	return math.sin(angle_rad), -math.cos(angle_rad)
 end
 
---every group to number: {group, bb, cx, tier (1 = bases, 2 = uppers)}
-local function collect(s)
+--every group to number: {group, box (the box it is measured by), full (the group's own box), centre_x, centre_y, tier (1 = bases, 2 = uppers),
+--angle_deg, kitchen_angle_deg}
+local function collect(settings)
 	local items, skipped, kitchens = {}, 0, 0
-	local use_facing = s ~= nil and s.facing
-	local flip = s ~= nil and s.flip_angle
+	local use_facing = settings ~= nil and settings.facing
+	local flip = settings ~= nil and settings.flip_angle
 	local top = {}
-	for g in pytha.enumerate_groups() do
-		if pytha.get_element_parent_group(g) == nil and group_name(g) ~= LABEL_GROUP_NAME then
-			table.insert(top, g)
+	for group in pytha.enumerate_groups() do
+		if pytha.get_element_parent_group(group) == nil and group_name(group) ~= LABEL_GROUP_NAME then
+			table.insert(top, group)
 		end
 	end
-	for _, g in ipairs(top) do
-		local data = wizard_data(g)
+	for _, group in ipairs(top) do
+		local data = wizard_data(group)
 		if data ~= nil then
 			kitchens = kitchens + 1
 			for _, spec in pairs(data.aux_values.cabinet_list) do
 				local cab = type(spec) == "table" and type(spec.aux_values) == "table" and spec.aux_values.main_group or nil
 				local in_kitchen = false
 				if cab ~= nil then
-					pcall(function() in_kitchen = (pytha.get_element_parent_group(cab) == g) end)
+					pcall(function() in_kitchen = (pytha.get_element_parent_group(cab) == group) end)
 				end
-				local bb, full
-				if in_kitchen then bb, full = item_box(cab, s) end
-				if bb ~= nil then
+				local box, full
+				if in_kitchen then box, full = item_box(cab, settings) end
+				if box ~= nil then
 					local tier = (spec.aux_values.row == WALL_ROW) and 2 or 1
-					table.insert(items, {group = cab, bb = bb, full = full, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = tier,
-						ang = group_angle(cab, flip), pang = group_angle(g, flip)})
+					table.insert(items, {group = cab, box = box, full = full, centre_x = (box[1][1] + box[2][1]) / 2, centre_y = (box[1][2] + box[2][2]) / 2, tier = tier,
+						angle_deg = group_angle(cab, flip), kitchen_angle_deg = group_angle(group, flip)})
 				else
 					skipped = skipped + 1
 				end
 			end
 		else
-			local bb, full = item_box(g, s)
-			if bb ~= nil then
-				table.insert(items, {group = g, bb = bb, full = full, cx = (bb[1][1] + bb[2][1]) / 2, cy = (bb[1][2] + bb[2][2]) / 2, tier = 1,
-					ang = group_angle(g, flip)})
+			local box, full = item_box(group, settings)
+			if box ~= nil then
+				table.insert(items, {group = group, box = box, full = full, centre_x = (box[1][1] + box[2][1]) / 2, centre_y = (box[1][2] + box[2][2]) / 2, tier = 1,
+					angle_deg = group_angle(group, flip)})
 			else
 				skipped = skipped + 1
 			end
@@ -265,203 +267,203 @@ local function collect(s)
 	if use_facing then
 		--bases first, then uppers. Within a tier: runs in clockwise order round the room (facing +x = left wall first, then facing -y =
 		--back wall, facing -x = right wall, facing +y = front wall), then left to right as seen from the front of the cabinets.
-		for _, it in ipairs(items) do
-			local a = it.ang or 0
-			it.run = math.floor(((90 - a) % 360) + 0.5) % 360
-			local r = math.rad(a)
-			it.along = it.cx * math.cos(r) + it.cy * math.sin(r)		--position along the cabinet's own left-to-right direction
+		for _, entry in ipairs(items) do
+			local angle = entry.angle_deg or 0
+			entry.run = math.floor(((90 - angle) % 360) + 0.5) % 360
+			local angle_rad = math.rad(angle)
+			entry.along = entry.centre_x * math.cos(angle_rad) + entry.centre_y * math.sin(angle_rad)		--position along the cabinet's own left-to-right direction
 		end
-		table.sort(items, function(a, b)
-			if a.tier ~= b.tier then return a.tier < b.tier end
-			if a.run ~= b.run then return a.run < b.run end
-			if math.abs(a.along - b.along) > 1e-6 then return a.along < b.along end
-			return a.bb[1][3] < b.bb[1][3]
+		table.sort(items, function(first, second)
+			if first.tier ~= second.tier then return first.tier < second.tier end
+			if first.run ~= second.run then return first.run < second.run end
+			if math.abs(first.along - second.along) > 1e-6 then return first.along < second.along end
+			return first.box[1][3] < second.box[1][3]
 		end)
 		return items, skipped, kitchens
 	end
 	--bases first, then uppers; each left to right by centre; ties front to back, then bottom to top
-	table.sort(items, function(a, b)
-		if a.tier ~= b.tier then return a.tier < b.tier end
-		if math.abs(a.cx - b.cx) > 1e-6 then return a.cx < b.cx end
-		if math.abs(a.bb[1][2] - b.bb[1][2]) > 1e-6 then return a.bb[1][2] < b.bb[1][2] end
-		return a.bb[1][3] < b.bb[1][3]
+	table.sort(items, function(first, second)
+		if first.tier ~= second.tier then return first.tier < second.tier end
+		if math.abs(first.centre_x - second.centre_x) > 1e-6 then return first.centre_x < second.centre_x end
+		if math.abs(first.box[1][2] - second.box[1][2]) > 1e-6 then return first.box[1][2] < second.box[1][2] end
+		return first.box[1][3] < second.box[1][3]
 	end)
 	return items, skipped, kitchens
 end
 
-function numbering_dialog(dialog, s)
+function numbering_dialog(dialog, settings)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, in order round the room (by facing). Existing numbers are kept.")
 
 	local renumber = dialog:create_check_box({1, 2}, pyloc "Renumber everything (restart at the start number)")
-	renumber:set_control_checked(s.renumber_all)
-	renumber:set_on_click_handler(function(state) s.renumber_all = state end)
+	renumber:set_control_checked(settings.renumber_all)
+	renumber:set_on_click_handler(function(state) settings.renumber_all = state end)
 
 	dialog:create_label(1, pyloc "Start at")
-	local start = dialog:create_text_box(2, pyui.format_number(s.start))
+	local start = dialog:create_text_box(2, pyui.format_number(settings.start))
 	start:set_on_change_handler(function(text)
-		local n = pyui.parse_number(text)
-		if n ~= nil and n >= 1 then
-			s.start = math.floor(n)
+		local typed_number = pyui.parse_number(text)
+		if typed_number ~= nil and typed_number >= 1 then
+			settings.start = math.floor(typed_number)
 		end
 	end)
 
 	local facing = dialog:create_check_box({1, 2}, pyloc "Order by each cabinet's facing (runs along any wall); untick for left to right along x")
-	facing:set_control_checked(s.facing)
-	facing:set_on_click_handler(function(state) s.facing = state end)
+	facing:set_control_checked(settings.facing)
+	facing:set_on_click_handler(function(state) settings.facing = state end)
 
-	local geo = dialog:create_check_box({1, 2}, pyloc "Use the parts' own box for centres and labels (ignores reference points; untick for the group's own box)")
-	geo:set_control_checked(s.geometry_box)
-	geo:set_on_click_handler(function(state) s.geometry_box = state end)
+	local geometry_check = dialog:create_check_box({1, 2}, pyloc "Use the parts' own box for centres and labels (ignores reference points; untick for the group's own box)")
+	geometry_check:set_control_checked(settings.geometry_box)
+	geometry_check:set_on_click_handler(function(state) settings.geometry_box = state end)
 
 	local flip = dialog:create_check_box({1, 2}, pyloc "Flip the angle sign (if the preview shows the rotation the other way round)")
-	flip:set_control_checked(s.flip_angle)
-	flip:set_on_click_handler(function(state) s.flip_angle = state end)
+	flip:set_control_checked(settings.flip_angle)
+	flip:set_on_click_handler(function(state) settings.flip_angle = state end)
 
 	local preview = dialog:create_check_box({1, 2}, pyloc "Preview the order only (lists numbers and angles, changes nothing)")
-	preview:set_control_checked(s.preview)
-	preview:set_on_click_handler(function(state) s.preview = state end)
+	preview:set_control_checked(settings.preview)
+	preview:set_on_click_handler(function(state) settings.preview = state end)
 
 	local rename = dialog:create_check_box({1, 2}, pyloc "Add the number to the group name (Base #3)")
-	rename:set_control_checked(s.rename)
-	rename:set_on_click_handler(function(state) s.rename = state end)
+	rename:set_control_checked(settings.rename)
+	rename:set_on_click_handler(function(state) settings.rename = state end)
 
 	local labels = dialog:create_check_box({1, 2}, pyloc "Place 3D number labels")
-	labels:set_control_checked(s.labels)
+	labels:set_control_checked(settings.labels)
 
 	dialog:create_label(1, pyloc "Label height")
-	local height = dialog:create_text_box(2, pyui.format_length(to_doc(s.label_height_mm)))
+	local height = dialog:create_text_box(2, pyui.format_length(to_doc(settings.label_height_mm)))
 	height:set_on_change_handler(function(text)
-		local v = pyui.parse_length(text)
-		if v ~= nil and v > 0 then
-			s.label_height_mm = to_mm(v)
+		local typed_length = pyui.parse_length(text)
+		if typed_length ~= nil and typed_length > 0 then
+			settings.label_height_mm = to_mm(typed_length)
 		end
 	end)
 
 	dialog:create_label(1, pyloc "Label layer (0 = active)")
-	local layer = dialog:create_text_box(2, pyui.format_number(s.layer))
+	local layer = dialog:create_text_box(2, pyui.format_number(settings.layer))
 	layer:set_on_change_handler(function(text)
-		local n = pyui.parse_number(text)
-		if n ~= nil and n >= 0 and n <= 256 then
-			s.layer = math.floor(n)
+		local typed_number = pyui.parse_number(text)
+		if typed_number ~= nil and typed_number >= 0 and typed_number <= 256 then
+			settings.layer = math.floor(typed_number)
 		end
 	end)
 
 	local pen_check = dialog:create_check_box(1, pyloc "Label pen (colour)")
-	pen_check:set_control_checked(s.pen > 0)
+	pen_check:set_control_checked(settings.pen > 0)
 	local pen = dialog:create_pen_list(2)
-	pen:set_control_selection(s.pen > 0 and s.pen or 1)
+	pen:set_control_selection(settings.pen > 0 and settings.pen or 1)
 	pen:set_on_change_handler(function(text, new_index)
-		local n = new_index or tonumber(text)
-		if n ~= nil and n >= 1 and n <= 256 then
-			s.pen_choice = math.floor(n)
-			if s.pen > 0 then s.pen = s.pen_choice end
+		local typed_pen = new_index or tonumber(text)
+		if typed_pen ~= nil and typed_pen >= 1 and typed_pen <= 256 then
+			settings.pen_choice = math.floor(typed_pen)
+			if settings.pen > 0 then settings.pen = settings.pen_choice end
 		end
 	end)
 	pen_check:set_on_click_handler(function(state)
 		if state then
-			s.pen = s.pen_choice or (s.pen > 0 and s.pen) or 1
+			settings.pen = settings.pen_choice or (settings.pen > 0 and settings.pen) or 1
 			pen:enable_control()
 		else
-			s.pen = 0
+			settings.pen = 0
 			pen:disable_control()
 		end
 	end)
-	if s.pen == 0 then pen:disable_control() end
+	if settings.pen == 0 then pen:disable_control() end
 
 	local function enable_label_options(state)
 		if state then
 			height:enable_control(); layer:enable_control(); pen_check:enable_control()
-			if s.pen > 0 then pen:enable_control() end
+			if settings.pen > 0 then pen:enable_control() end
 		else
 			height:disable_control(); layer:disable_control(); pen_check:disable_control(); pen:disable_control()
 		end
 	end
 	labels:set_on_click_handler(function(state)
-		s.labels = state
+		settings.labels = state
 		enable_label_options(state)
 	end)
-	if not s.labels then enable_label_options(false) end
+	if not settings.labels then enable_label_options(false) end
 
 	dialog:create_ok_button(1)
 	dialog:create_cancel_button(2)
 	dialog:equalize_column_widths({1, 2})
 end
 
-local function place_label(text, it, s)
-	local bb = it.bb
-	local h = to_doc(s.label_height_mm)
-	local thickness = h / 10
-	local ang = s.facing and (it.ang or 0) or 0
-	local r = math.rad(ang)
-	local ux, uy = math.cos(r), math.sin(r)				--left to right as seen from the front
-	local fx, fy = facing_vector(ang)					--the direction the front looks
-	local cx, cy = (bb[1][1] + bb[2][1]) / 2, (bb[1][2] + bb[2][2]) / 2
-	local dx, dy = bb[2][1] - bb[1][1], bb[2][2] - bb[1][2]
-	local half_depth = (math.abs(fx) * dx + math.abs(fy) * dy) / 2		--front face of the box, along the facing direction
-	local origin = {cx + fx * half_depth, cy + fy * half_depth, bb[2][3] + to_doc(s.label_gap_mm)}
+local function place_label(text, entry, settings)
+	local box = entry.box
+	local label_height = to_doc(settings.label_height_mm)
+	local thickness = label_height / 10
+	local angle_deg = settings.facing and (entry.angle_deg or 0) or 0
+	local angle_rad = math.rad(angle_deg)
+	local across_x, across_y = math.cos(angle_rad), math.sin(angle_rad)				--left to right as seen from the front
+	local front_x, front_y = facing_vector(angle_deg)					--the direction the front looks
+	local centre_x, centre_y = (box[1][1] + box[2][1]) / 2, (box[1][2] + box[2][2]) / 2
+	local size_x, size_y = box[2][1] - box[1][1], box[2][2] - box[1][2]
+	local half_depth = (math.abs(front_x) * size_x + math.abs(front_y) * size_y) / 2		--front face of the box, along the facing direction
+	local origin = {centre_x + front_x * half_depth, centre_y + front_y * half_depth, box[2][3] + to_doc(settings.label_gap_mm)}
 	--upright, reading from the front: letters in the plane across the cabinet, extruded away from the front
-	local token = pytha.push_local_coordinates(origin, {u_axis = {ux, uy, 0}, v_axis = {0, 0, 1}, w_axis = {fx, fy, 0}})
-	local ok, label = pcall(function() return pytha.create_text_3d(text, h, thickness) end)
+	local token = pytha.push_local_coordinates(origin, {u_axis = {across_x, across_y, 0}, v_axis = {0, 0, 1}, w_axis = {front_x, front_y, 0}})
+	local call_ok, label = pcall(function() return pytha.create_text_3d(text, label_height, thickness) end)
 	pytha.pop_local_coordinates(token)
-	if not ok then
+	if not call_ok then
 		error(label, 0)
 	end
 	--the text now exists in the model: if any step below fails, delete it so no stray label is left behind
-	local okp, perr = pcall(function()
+	local ok_steps, steps_error = pcall(function()
 		--create_text_3d starts the text at the origin; centre it over the group along the left-to-right direction
-		local lb = pytha.get_element_bounding_box(label)
-		local width = math.abs(ux) * (lb[2][1] - lb[1][1]) + math.abs(uy) * (lb[2][2] - lb[1][2])
-		pytha.move_element(label, {-ux * width / 2, -uy * width / 2, 0})
+		local label_box = pytha.get_element_bounding_box(label)
+		local width = math.abs(across_x) * (label_box[2][1] - label_box[1][1]) + math.abs(across_y) * (label_box[2][2] - label_box[1][2])
+		pytha.move_element(label, {-across_x * width / 2, -across_y * width / 2, 0})
 		pytha.set_element_name(label, LABEL_PREFIX .. text)
-		if s.layer > 0 then
-			pytha.set_element_layer(label, s.layer)
+		if settings.layer > 0 then
+			pytha.set_element_layer(label, settings.layer)
 		end
-		if s.pen > 0 then
-			pytha.set_element_pen(label, s.pen)	--a part with no material shows in its pen colour
+		if settings.pen > 0 then
+			pytha.set_element_pen(label, settings.pen)	--a part with no material shows in its pen colour
 		end
 	end)
-	if not okp then
+	if not ok_steps then
 		pcall(pytha.delete_element, label)
-		error(perr, 0)
+		error(steps_error, 0)
 	end
 	return label
 end
 
 --preview note: how far the group's own box centre (reference points included) sits from the parts' box centre
-local function ref_shift_note(it)
-	if it.full == nil or it.bb == it.full then return "" end
-	local fx = (it.full[1][1] + it.full[2][1]) / 2 - it.cx
-	local fy = (it.full[1][2] + it.full[2][2]) / 2 - it.cy
-	if math.abs(fx) < 0.05 and math.abs(fy) < 0.05 then return "" end
-	return string.format("   (reference points would shift the centre by %.1f, %.1f)", fx, fy)
+local function ref_shift_note(entry)
+	if entry.full == nil or entry.box == entry.full then return "" end
+	local front_x = (entry.full[1][1] + entry.full[2][1]) / 2 - entry.centre_x
+	local front_y = (entry.full[1][2] + entry.full[2][2]) / 2 - entry.centre_y
+	if math.abs(front_x) < 0.05 and math.abs(front_y) < 0.05 then return "" end
+	return string.format("   (reference points would shift the centre by %.1f, %.1f)", front_x, front_y)
 end
 
 function number_groups()
-	local s = load_settings()
-	if pyui.run_modal_subdialog(numbering_dialog, s) ~= "ok" then
+	local settings = load_settings()
+	if pyui.run_modal_subdialog(numbering_dialog, settings) ~= "ok" then
 		return
 	end
-	local renumber_all = s.renumber_all
-	s.pen_choice = nil
-	pyio.save_values("numbering_settings", s)
+	local renumber_all = settings.renumber_all
+	settings.pen_choice = nil
+	pyio.save_values("numbering_settings", settings)
 
-	if s.preview then
-		local pitems = collect(s)
-		local rows = {pyloc "Group Numbering - preview (nothing changed)", "unit " .. pytha.get_length_unit() .. "; facing " .. (s.facing and "on" or "off") .. (s.flip_angle and ", angle flipped" or ""), ""}
-		for i, it in ipairs(pitems) do
-			local nm = group_name(it.group)
-			table.insert(rows, string.format("%d. %s   angle %s%s   centre %.0f, %.0f   %s", i, nm == "" and "(unnamed)" or nm,
-				it.ang and string.format("%.1f", it.ang) or "?", it.pang and string.format(" (kitchen %.1f)", it.pang) or "",
-				it.cx, it.cy, it.tier == 2 and "upper" or "base") .. ref_shift_note(it))
-			if i >= 40 then table.insert(rows, "... " .. (#pitems - 40) .. " more"); break end
+	if settings.preview then
+		local pitems = collect(settings)
+		local rows = {pyloc "Group Numbering - preview (nothing changed)", "unit " .. pytha.get_length_unit() .. "; facing " .. (settings.facing and "on" or "off") .. (settings.flip_angle and ", angle flipped" or ""), ""}
+		for row_number, entry in ipairs(pitems) do
+			local display_name = group_name(entry.group)
+			table.insert(rows, string.format("%d. %s   angle %s%s   centre %.0f, %.0f   %s", row_number, display_name == "" and "(unnamed)" or display_name,
+				entry.angle_deg and string.format("%.1f", entry.angle_deg) or "?", entry.kitchen_angle_deg and string.format(" (kitchen %.1f)", entry.kitchen_angle_deg) or "",
+				entry.centre_x, entry.centre_y, entry.tier == 2 and "upper" or "base") .. ref_shift_note(entry))
+			if row_number >= 40 then table.insert(rows, "... " .. (#pitems - 40) .. " more"); break end
 		end
 		pyui.alert(table.concat(rows, "\n"))
 		pcall(function() pyio.write_lines(pyio.get_scratch_folder_path("group_numbering_preview.txt"), rows) end)
 		return
 	end
 	local removed = delete_labels()
-	local items, skipped, kitchens = collect(s)
+	local items, skipped, kitchens = collect(settings)
 	if #items == 0 then
 		pyui.alert(pyloc "Group Numbering: nothing to number (no cabinets or top-level groups found).")
 		return
@@ -470,24 +472,24 @@ function number_groups()
 	--keep existing numbers (left to right, the first holder of a number keeps it); everything else gets
 	--the next free number above the highest one in use
 	local used, kept = {}, 0
-	local highest = s.start - 1
+	local highest = settings.start - 1
 	if not renumber_all then
-		for _, it in ipairs(items) do
-			local n = existing_number(it.group)
-			if n ~= nil and not used[n] then
-				used[n] = true
-				it.number = n
+		for _, entry in ipairs(items) do
+			local number = existing_number(entry.group)
+			if number ~= nil and not used[number] then
+				used[number] = true
+				entry.number = number
 				kept = kept + 1
-				if n > highest then highest = n end
+				if number > highest then highest = number end
 			end
 		end
 	end
 	local next_free = highest + 1
 	local assigned = 0
-	for _, it in ipairs(items) do
-		if it.number == nil then
+	for _, entry in ipairs(items) do
+		if entry.number == nil then
 			while used[next_free] do next_free = next_free + 1 end
-			it.number = next_free
+			entry.number = next_free
 			used[next_free] = true
 			next_free = next_free + 1
 			assigned = assigned + 1
@@ -496,23 +498,23 @@ function number_groups()
 
 	local failed, renamed, labels, label_errors = 0, 0, {}, 0
 	local rename_failed, rename_example = 0, nil
-	for _, it in ipairs(items) do
-		local n = it.number
-		if not pcall(function() pytha.set_element_attributes(it.group, {[46] = n}) end) then
+	for _, entry in ipairs(items) do
+		local number = entry.number
+		if not pcall(function() pytha.set_element_attributes(entry.group, {[46] = number}) end) then
 			failed = failed + 1
 		end
-		if s.rename then
-			local want = base_name(group_name(it.group)) .. NAME_SEPARATOR .. n
-			if apply_name(it.group, want) then
+		if settings.rename then
+			local want = base_name(group_name(entry.group)) .. NAME_SEPARATOR .. number
+			if apply_name(entry.group, want) then
 				renamed = renamed + 1
 			else
 				rename_failed = rename_failed + 1
-				if rename_example == nil then rename_example = {want = want, got = group_name(it.group)} end
+				if rename_example == nil then rename_example = {want = want, got = group_name(entry.group)} end
 			end
 		end
-		if s.labels then
-			local okl, label = pcall(function() return place_label(tostring(n), it, s) end)
-			if okl and label ~= nil then
+		if settings.labels then
+			local ok_label, label = pcall(function() return place_label(tostring(number), entry, settings) end)
+			if ok_label and label ~= nil then
 				table.insert(labels, label)
 			else
 				label_errors = label_errors + 1
@@ -524,17 +526,17 @@ function number_groups()
 	end
 
 	local bases, uppers = 0, 0
-	for _, it in ipairs(items) do
-		if it.tier == 2 then uppers = uppers + 1 else bases = bases + 1 end
+	for _, entry in ipairs(items) do
+		if entry.tier == 2 then uppers = uppers + 1 else bases = bases + 1 end
 	end
 	local msg = {pyloc "Group Numbering", ""}
 	table.insert(msg, #items .. " cabinet(s)/group(s): " .. bases .. " base / other, " .. uppers .. " upper" .. (kitchens > 0 and (", from " .. kitchens .. " Kitchen Wizard kitchen(s)") or "") .. ".")
 	if renumber_all then
-		table.insert(msg, "Renumbered everything from " .. s.start .. ".")
+		table.insert(msg, "Renumbered everything from " .. settings.start .. ".")
 	else
 		table.insert(msg, kept .. " kept their number, " .. assigned .. " got a new one.")
 	end
-	if s.rename then
+	if settings.rename then
 		table.insert(msg, renamed .. " group name(s) updated (e.g. 'Base #3').")
 		if rename_failed > 0 then
 			table.insert(msg, rename_failed .. " group name(s) did not stick: wanted '" .. rename_example.want .. "', PYTHA still has '" .. rename_example.got .. "'.")
@@ -542,8 +544,8 @@ function number_groups()
 	end
 	if failed > 0 then table.insert(msg, "Could not write the position number on " .. failed .. " group(s).") end
 	if skipped > 0 then table.insert(msg, skipped .. " group(s) without geometry were skipped.") end
-	if s.labels then
-		table.insert(msg, #labels .. " label(s) placed in the group '" .. LABEL_GROUP_NAME .. "'" .. (s.layer > 0 and (" on layer " .. s.layer) or "") .. ".")
+	if settings.labels then
+		table.insert(msg, #labels .. " label(s) placed in the group '" .. LABEL_GROUP_NAME .. "'" .. (settings.layer > 0 and (" on layer " .. settings.layer) or "") .. ".")
 		if label_errors > 0 then table.insert(msg, label_errors .. " label(s) could not be placed.") end
 	end
 	if removed > 0 then table.insert(msg, "Old labels replaced.") end
@@ -573,25 +575,25 @@ local function launcher_actions()
 	}
 end
 
-local function launcher_dialog(dialog, st)
+local function launcher_dialog(dialog, launcher)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_label(1, pyloc "Action")
 	local list = dialog:create_drop_list(2)
-	for _, a in ipairs(st.actions) do
-		list:insert_control_item(a[1])
+	for _, action in ipairs(launcher.actions) do
+		list:insert_control_item(action[1])
 	end
-	list:set_control_selection(st.pick)
-	local info = dialog:create_label({1, 2}, st.actions[st.pick][3])
+	list:set_control_selection(launcher.pick)
+	local info = dialog:create_label({1, 2}, launcher.actions[launcher.pick][3])
 	list:set_on_change_handler(function(text, index)
-		local i = tonumber(index)
-		if i == nil then
-			for n, a in ipairs(st.actions) do
-				if a[1] == text then i = n end
+		local chosen_index = tonumber(index)
+		if chosen_index == nil then
+			for action_index, action in ipairs(launcher.actions) do
+				if action[1] == text then chosen_index = action_index end
 			end
 		end
-		if i ~= nil and st.actions[i] ~= nil then
-			st.pick = i
-			info:set_control_text(st.actions[i][3])
+		if chosen_index ~= nil and launcher.actions[chosen_index] ~= nil then
+			launcher.pick = chosen_index
+			info:set_control_text(launcher.actions[chosen_index][3])
 		end
 	end)
 	dialog:create_ok_button(1)
@@ -600,14 +602,14 @@ local function launcher_dialog(dialog, st)
 end
 
 function numbering_launcher()
-	local st = {pick = 1, actions = launcher_actions()}
+	local launcher = {pick = 1, actions = launcher_actions()}
 	local ok_load, saved = pcall(function() return pyio.load_values(LAUNCHER_STORE) end)
-	if ok_load and type(saved) == "table" and st.actions[tonumber(saved.pick) or 0] ~= nil then
-		st.pick = tonumber(saved.pick)
+	if ok_load and type(saved) == "table" and launcher.actions[tonumber(saved.pick) or 0] ~= nil then
+		launcher.pick = tonumber(saved.pick)
 	end
-	if pyui.run_modal_subdialog(launcher_dialog, st) ~= "ok" then
+	if pyui.run_modal_subdialog(launcher_dialog, launcher) ~= "ok" then
 		return
 	end
-	pcall(function() pyio.save_values(LAUNCHER_STORE, {pick = st.pick}) end)
-	st.actions[st.pick][2]()
+	pcall(function() pyio.save_values(LAUNCHER_STORE, {pick = launcher.pick}) end)
+	launcher.actions[launcher.pick][2]()
 end

@@ -14,25 +14,25 @@ end
 
 -- attribute by name, falling back to its numeric ID (PYTHA attribute table: layer 1064,
 -- layer_name 2064, pen 62, name 3)
-local function attr(part, key, id)
-	local v = pytha.get_element_attribute(part, key)
-	if v == nil or v == "" then
-		v = pytha.get_element_attribute(part, id)
+local function read_attribute(part, attribute_name, attribute_id)
+	local value = pytha.get_element_attribute(part, attribute_name)
+	if value == nil or value == "" then
+		value = pytha.get_element_attribute(part, attribute_id)
 	end
-	return v
+	return value
 end
 
 --set a part's name and read it back: set_element_name can do nothing without raising an error
 local function set_name(part, name)
 	pcall(pytha.set_element_name, part, name)
-	if (attr(part, "name", 3) or "") == name then return true end
+	if (read_attribute(part, "name", 3) or "") == name then return true end
 	pcall(pytha.set_element_attributes, part, {[3] = name})
-	return (attr(part, "name", 3) or "") == name
+	return (read_attribute(part, "name", 3) or "") == name
 end
 
 local function has_tagged()
 	for part in pytha.enumerate_parts() do
-		local name = attr(part, "name", 3) or ""
+		local name = read_attribute(part, "name", 3) or ""
 		if strip_tag(name) ~= name then
 			return true
 		end
@@ -43,11 +43,11 @@ end
 local function tag_parts()
 	local tagged, skipped, failed = 0, 0, 0
 	for part in pytha.enumerate_parts() do
-		local name = strip_tag(attr(part, "name", 3))
-		local layer = tonumber(attr(part, "layer", 1064))
-		local pen = tonumber(attr(part, "pen", 62))
+		local name = strip_tag(read_attribute(part, "name", 3))
+		local layer = tonumber(read_attribute(part, "layer", 1064))
+		local pen = tonumber(read_attribute(part, "pen", 62))
 		if layer ~= nil and pen ~= nil then
-			local layer_name = attr(part, "layer_name", 2064) or ""
+			local layer_name = read_attribute(part, "layer_name", 2064) or ""
 			layer_name = string.gsub(layer_name, "[{}]", "")
 			if set_name(part, name .. " {L" .. math.floor(layer) .. ":" .. layer_name .. " P" .. math.floor(pen) .. "}") then
 				tagged = tagged + 1
@@ -58,20 +58,20 @@ local function tag_parts()
 			skipped = skipped + 1
 		end
 	end
-	local msg = pyloc "Tagged parts: " .. tagged
+	local message = pyloc "Tagged parts: " .. tagged
 	if skipped > 0 then
-		msg = msg .. "\n" .. pyloc "Skipped (layer or pen not readable): " .. skipped
+		message = message .. "\n" .. pyloc "Skipped (layer or pen not readable): " .. skipped
 	end
 	if failed > 0 then
-		msg = msg .. "\n" .. pyloc "Name did not change (PYTHA ignored the rename): " .. failed
+		message = message .. "\n" .. pyloc "Name did not change (PYTHA ignored the rename): " .. failed
 	end
-	pyui.alert(msg .. "\n\n" .. pyloc "Export glTF now, then run Export tags again to remove the tags.")
+	pyui.alert(message .. "\n\n" .. pyloc "Export glTF now, then run Export tags again to remove the tags.")
 end
 
 local function untag_parts()
 	local cleaned, failed = 0, 0
 	for part in pytha.enumerate_parts() do
-		local name = attr(part, "name", 3) or ""
+		local name = read_attribute(part, "name", 3) or ""
 		local stripped = strip_tag(name)
 		if stripped ~= name then
 			if set_name(part, stripped) then
@@ -81,13 +81,13 @@ local function untag_parts()
 			end
 		end
 	end
-	local msg = pyloc "Tags removed from parts: " .. cleaned
+	local message = pyloc "Tags removed from parts: " .. cleaned
 	if failed > 0 then
-		msg = msg .. "\n" .. pyloc "Still tagged (PYTHA ignored the rename): " .. failed .. "\n\n" .. pyloc "Run Export tags again to retry."
+		message = message .. "\n" .. pyloc "Still tagged (PYTHA ignored the rename): " .. failed .. "\n\n" .. pyloc "Run Export tags again to retry."
 	else
-		msg = msg .. "\n\n" .. pyloc "Part names are back to normal."
+		message = message .. "\n\n" .. pyloc "Part names are back to normal."
 	end
-	pyui.alert(msg)
+	pyui.alert(message)
 end
 
 function export_tags()

@@ -1,0 +1,12 @@
+# scratch files from editing and patching
+*.rej
+*.orig
+*.new
+*.bak
+# Python
+__pycache__/
+*.pyc
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
