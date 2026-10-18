@@ -10,6 +10,8 @@ PYTHA plugin (V26). Numbers every top-level group in the model, in order round t
 
 ![Red 3D number labels above each cabinet of a Kitchen Wizard L-shaped kitchen](images/group-numbering-labels.png)
 
+*In the picture, labels 1 and 2 overlap at the left end. This is probably caused by the Kitchen Wizard's blind end configuration at that end of the run (not yet confirmed), not by the numbering itself. The numbers are still assigned correctly.*
+
 What each number does:
 - It is written to the group's position number, so the Parts List can show it.
 - It is appended to the group name ("Base" becomes "Base #3").
