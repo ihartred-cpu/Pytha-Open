@@ -10,7 +10,6 @@ Unofficial community tools, not affiliated with PYTHA Lab. Built and tested on P
 | [Sheet Kit (beta)](Sheet%20Kit%20v0.5%20beta/) | PYTHA plugin | Makes a plot sheet with front, top and side views of the model, view labels, a title block and US architectural scales |
 | [Glyph Lab](Glyph%20Lab%20v0.6/) | PYTHA plugin (test) | Builds a smiley and a warning sign several ways (text, linework, extruded faces, booleans) and reports which Lua calls your install accepts |
 | [Profile Runs](Profile%20Runs%20v0.1/) | PYTHA plugin | LED channel runs and closet rods, named so Workshop rules can cut the grooves and holes (untested in PYTHA so far) |
-| [Plan Callouts](Plan%20Callouts%20v0.1/) | PYTHA plugin | Plan-view sheet with a number and code on each cabinet (dwr stack, tall, dw, sink and so on, plus hardware tags) and a cabinet schedule; also an elevation sheet with numbers on every cabinet and text only for hardware and spec'd items; and a per-cabinet sections sheet whose section objects draw cut lines on the plan and elevations (untested in PYTHA so far) |
 | [Playground](Playground%20v0.1/) | PYTHA plugin | Small games (Road Racer, Sheet Tetris) that double as practice for the Lua timer and dialog API (untested in PYTHA so far) |
 | [Pytha to Blender Import](Pytha%20to%20Blender%20Import/) | PYTHA plugin + Blender add-on | Brings PYTHA glTF exports into Blender with the group tree, layers and pens |
 | [Texture Folder to .pymat](Texture%20Folder%20to%20.pymat/) | Web page | Builds `.pymat` material libraries from texture folders |
