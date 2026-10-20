@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
+  <header>
+    <guid>d7032b6f-19b0-4e92-84d9-46915581cc65</guid>
+    <version>0.1</version>
+    <pytha-version>26.0</pytha-version>
+    <name>Playground</name>
+    <description>Small games (Road Racer, Sheet Tetris) that double as practice for the PYTHA Lua API: timers, dialog buttons, moving parts.</description>
+    <licensing>MIT License.</licensing>
+  </header>
+  <extension type="function">
+    <entry-point>playground</entry-point>
+    <caption>Playground</caption>
+    <description>Pick a small game. Everything it builds is removed when you close it.</description>
+  </extension>
+</plugin>

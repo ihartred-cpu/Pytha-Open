@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff srcLang="en-US" version="2.0" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file original="config.xml">
+    <unit id="d7032b6f00000001"><segment><source>Playground</source></segment></unit>
+    <unit id="d7032b6f00000002"><segment><source>Pick a small game. Everything it builds is removed when you close it.</source></segment></unit>
+  </file>
+</xliff>

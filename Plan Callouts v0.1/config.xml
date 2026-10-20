@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin xmlns="http://xmlns.pytha.com/plugin_config/1.0">
+  <header>
+    <guid>085fa454-df51-47a4-9a8a-ae71cbd6903e</guid>
+    <version>0.1</version>
+    <pytha-version>26.0</pytha-version>
+    <name>Plan Callouts</name>
+    <description>Numbers and short codes on a plan view, plus a cabinet schedule, from the Kitchen Wizard cabinet data and hardware tags.</description>
+    <licensing>MIT License.</licensing>
+  </header>
+  <extension type="function">
+    <entry-point>plan_callouts</entry-point>
+    <caption>Plan Callouts</caption>
+    <description>Make a plan sheet with cabinet numbers, codes and a schedule.</description>
+  </extension>
+  <extension type="function">
+    <entry-point>tag_hardware</entry-point>
+    <caption>Plan Callouts - Tag hardware</caption>
+    <description>Add hardware tags (trash RO, LeMans, UC wine and so on) to picked cabinets.</description>
+  </extension>
+  <extension type="function">
+    <entry-point>plan_elevations</entry-point>
+    <caption>Plan Callouts - Elevations</caption>
+    <description>Make an elevation sheet: a number on every cabinet, text only for hardware and spec'd items.</description>
+  </extension>
+  <extension type="function">
+    <entry-point>plan_sections</entry-point>
+    <caption>Plan Callouts - Sections</caption>
+    <description>Make a sheet of side sections through each spec'd or hardware cabinet; the cut lines show on plan and elevation sheets.</description>
+  </extension>
+  <extension type="function">
+    <entry-point>remove_cabinet_sections</entry-point>
+    <caption>Plan Callouts - Remove sections</caption>
+    <description>Delete the section objects made by Plan Callouts - Sections in this session.</description>
+  </extension>
+</plugin>
