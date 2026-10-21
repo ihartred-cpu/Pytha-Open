@@ -19,7 +19,7 @@ Door-shaped parts fall onto a 4 x 8 sheet standing up (4 in cells). **Left / Rig
 - Updating a dialog label from a callback fails now and then, so it is wrapped and done every few frames.
 
 ## Status
-Both games run in PYTHA V26 (backlog T60). Road Racer was tested with 17 Fennec models on an 11200 mm radius cylinder with no lag. Still to confirm: model rotation after the last change, and textured `.pyo` files keeping their materials on import.
+Both games run in PYTHA V26 (backlog T60); Sheet Tetris tested and works well. Road Racer was tested with 17 Fennec models on an 11200 mm radius cylinder with no lag. Still to confirm: model rotation after the last change, and textured `.pyo` files keeping their materials on import.
 
 `road-racer.gif` is a compressed 14 s clip (the original capture was 55 MB, kept out of the repo).
 

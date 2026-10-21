@@ -1,3 +1,4 @@
+-- Group Numbering v1.7 (2026-10-20 addition) - overlap check: a warning (in the summary and the preview) when two cabinets overlap by 30% or more of the smaller one, e.g. a second run started on top of an existing one. Nothing is moved or deleted.
 -- Group Numbering v1.7 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
 --   On V26 a group's bounding box also covers its reference points (connection, hinge and handle points), which stretched the box of
 --   cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option "Use the
@@ -48,6 +49,8 @@ local LABEL_PREFIX = "Group No. "
 local NAME_SEPARATOR = " #"					--"Base" -> "Base #3"
 local WIZARD_HISTORY_KEYS = {"wizard_history"}	--Kitchen Wizard's element-history key
 local WALL_ROW = 0x2						--Kitchen Wizard row code for wall cabinets
+local OVERLAP_MIN_RATIO = 0.3			--two cabinets count as overlapping when they share this much of the SMALLER one's box (touching faces and thin overlaps do not)
+local OVERLAP_TOL_MM = 2				--an overlap thinner than this on any axis is just two cabinets touching
 
 local DEFAULTS = {
 	start = 1,
@@ -291,6 +294,51 @@ local function collect(settings)
 	return items, skipped, kitchens
 end
 
+--two cabinets sitting on top of each other: PYTHA lets a second run be started over an existing one, and the two then get consecutive
+--numbers and their labels overprint. Compares the boxes the items are measured by (the parts' boxes); returns {first, second, ratio}
+--index pairs into items, ratio = shared volume / volume of the smaller box. A blind corner's L shape is measured by its square box, so a
+--neighbour tucked into the blind part can be flagged: it is a warning, nothing is changed.
+local function find_overlaps(items)
+	local found = {}
+	local tolerance = to_doc(OVERLAP_TOL_MM)
+	local function volume(box) return (box[2][1] - box[1][1]) * (box[2][2] - box[1][2]) * (box[2][3] - box[1][3]) end
+	for first_index = 1, #items - 1 do
+		local first = items[first_index].box
+		for second_index = first_index + 1, #items do
+			local second = items[second_index].box
+			local shared, inside = 1, true
+			for axis = 1, 3 do
+				local low = math.max(first[1][axis], second[1][axis])
+				local high = math.min(first[2][axis], second[2][axis])
+				if high - low <= tolerance then inside = false; break end
+				shared = shared * (high - low)
+			end
+			if inside then
+				local smaller = math.min(volume(first), volume(second))
+				if smaller > 0 and shared / smaller >= OVERLAP_MIN_RATIO then
+					table.insert(found, {first = first_index, second = second_index, ratio = shared / smaller})
+				end
+			end
+		end
+	end
+	return found
+end
+
+--text lines for the overlaps; describe(entry, index) names one side
+local function overlap_lines(items, found, describe)
+	local lines = {}
+	if #found == 0 then return lines end
+	table.insert(lines, "WARNING: " .. #found .. " pair(s) of cabinets overlap - probably a copy sitting on top of another (e.g. a second run started over an existing one):")
+	for pair_number, pair in ipairs(found) do
+		table.insert(lines, string.format("  %s and %s share %d%% of the smaller cabinet", describe(items[pair.first], pair.first), describe(items[pair.second], pair.second), math.floor(pair.ratio * 100 + 0.5)))
+		if pair_number >= 8 then
+			table.insert(lines, "  ... " .. (#found - 8) .. " more")
+			break
+		end
+	end
+	return lines
+end
+
 function numbering_dialog(dialog, settings)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, in order round the room (by facing). Existing numbers are kept.")
@@ -458,6 +506,14 @@ function number_groups()
 				entry.centre_x, entry.centre_y, entry.tier == 2 and "upper" or "base") .. ref_shift_note(entry))
 			if row_number >= 40 then table.insert(rows, "... " .. (#pitems - 40) .. " more"); break end
 		end
+		local overlap_rows = overlap_lines(pitems, find_overlaps(pitems), function(entry, row_number)
+			local display_name = group_name(entry.group)
+			return string.format("%d (%s)", row_number, display_name == "" and "unnamed" or display_name)
+		end)
+		if #overlap_rows > 0 then
+			table.insert(rows, "")
+			for _, row in ipairs(overlap_rows) do table.insert(rows, row) end
+		end
 		pyui.alert(table.concat(rows, "\n"))
 		pcall(function() pyio.write_lines(pyio.get_scratch_folder_path("group_numbering_preview.txt"), rows) end)
 		return
@@ -549,6 +605,13 @@ function number_groups()
 		if label_errors > 0 then table.insert(msg, label_errors .. " label(s) could not be placed.") end
 	end
 	if removed > 0 then table.insert(msg, "Old labels replaced.") end
+	local overlap_rows = overlap_lines(items, find_overlaps(items), function(entry)
+		return string.format("%d (%s)", entry.number, group_name(entry.group))
+	end)
+	if #overlap_rows > 0 then
+		table.insert(msg, "")
+		for _, row in ipairs(overlap_rows) do table.insert(msg, row) end
+	end
 	table.insert(msg, "")
 	table.insert(msg, "A Kitchen Wizard Edit rebuilds the kitchen: its cabinets lose their numbers and get new ones on the next run.")
 	pyui.alert(table.concat(msg, "\n"))
