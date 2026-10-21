@@ -7,10 +7,11 @@ PYTHA plugin (V26). Numbers every top-level group in the model, in order round t
 - **Order:** bases first (Kitchen Wizard base and tall cabinets, plus every other top-level group), then uppers (Kitchen Wizard wall cabinets).
 - **Facing (new in 1.5):** each cabinet is ordered by the way it faces, not just along the x axis. Runs are walked clockwise round the room (left wall, back wall, right wall, front wall, as seen from above), and inside a run the numbers go left to right as seen from the front of the cabinets. The 3D labels sit on the front face and read from the front. The facing comes from `pytha.get_group_angle` (V26), assuming angle 0 faces -y. Untick "Order by each cabinet's facing" for the old left-to-right-along-x order.
 - **Part boxes (new in 1.7):** centres and label positions come from the box of each group's parts, not the group's own bounding box. On V26 a group's own box also covers its reference points (connection, hinge and handle points), which can stretch it, move its centre and put a number out of order. Untick "Use the parts' own box" to get the 1.5 behaviour. A reference point that sits on a part itself still counts.
+- **Overlap warning (added 2026-10-20):** PYTHA lets you start a second run on top of an existing one, which gives the buried cabinet its own number and makes two labels overprint. When two cabinets share 30% or more of the smaller one's box, the summary (and the preview) lists the pair, e.g. `1 (Base #1) and 2 (Copy #2) share 83% of the smaller cabinet`. Nothing is moved or deleted; delete the extra copy and run again. A blind corner is measured by its square box, so a neighbour tucked into the blind part can be flagged too.
 
 ![Red 3D number labels above each cabinet of a Kitchen Wizard L-shaped kitchen](images/group-numbering-labels.png)
 
-*In the picture, labels 1 and 2 overlap at the left end. This is probably caused by the Kitchen Wizard's blind end configuration at that end of the run (not yet confirmed), not by the numbering itself. The numbers are still assigned correctly.*
+*An L-shaped Kitchen Wizard kitchen, numbered. Labels sit above the front of each cabinet; the numbers run left to right along each wall.*
 
 What each number does:
 - It is written to the group's position number, so the Parts List can show it.
