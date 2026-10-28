@@ -59,14 +59,19 @@ end
 ----------------------------------------------------------------------------------------------------------------
 -- Road Racer: the car stays put, a big cylinder spins under it, obstacles ride on the cylinder, left/right buttons change lane
 ----------------------------------------------------------------------------------------------------------------
-local ROAD = {radius = 11200, lanes = 8, lane_width = 200, count = 16, hit_degrees = 1.2, turn_scale = 0.125, car_turn = 0, cube_turn = 0, cx = 6000, cy = 5000, DIR = 1}
+local ROAD = {radius = 11200, lanes = 8, lane_width = 200, count = 16, hit_degrees = 1.2, turn_scale = 0.125, car_turn = 0, cube_turn = 0, cx = 6000, cy = 5000, DIR = 1, keep_road = true, obstacle = "sphere", paint_car = true, road_turned = false}
 
 -- import a .pyo (turned about z); returns one element (its top group) or nil
-local function import_model(handle, turn)
+local function import_model(handle, turn, track)
 	if handle == nil then return nil end
 	local loaded = try(function() return pytha.import_pyo(handle) end)
 	if type(loaded) ~= "table" or #loaded == 0 then return nil end
 	local el = try(function() return pytha.get_element_common_group(loaded) end) or loaded
+	-- remember every imported part (and the group) so the clean-up can delete each one on its own
+	if track ~= nil then
+		for _, part in ipairs(loaded) do table.insert(track, part) end
+		if type(el) ~= "table" then table.insert(track, el) end
+	end
 	if turn ~= 0 then try(function() pytha.rotate_element(el, {0, 0, 0}, "z", turn) end) end
 	return el
 end
@@ -88,8 +93,8 @@ local function stand_model(el, x, y, z)
 	try(function() pytha.move_element(el, {x - mid_x, y - mid_y, z - bottom}) end)
 end
 
-local function place_model(handle, x, y, z, turn)
-	local el = import_model(handle, turn)
+local function place_model(handle, x, y, z, turn, track)
+	local el = import_model(handle, turn, track)
 	if el ~= nil then stand_model(el, x, y, z) end
 	return el
 end
@@ -107,8 +112,52 @@ local function save_models(models)
 	try(function() pyio.save_values(MODEL_STORE, models) end)
 end
 
+-- materials: picked in the models dialog (pyux.select_material) and remembered. The road is given cylinder
+-- projection and a tile size that closes around the circumference, the ball sphere projection.
+local MATERIAL_STORE = "playground_materials"
+
+-- two stores: one with the handles (may not be storable on every build) and one with just the names
+local function load_materials()
+	local loaded = try(function() return pyio.load_values(MATERIAL_STORE) end)
+	if type(loaded) ~= "table" or next(loaded) == nil then
+		loaded = try(function() return pyio.load_values(MATERIAL_STORE .. "_names") end)
+		if type(loaded) ~= "table" then loaded = {} end
+	end
+	return loaded
+end
+
+local function save_materials(mats)
+	local names = {}
+	for key, value in pairs(mats) do if type(value) == "string" then names[key] = value end end
+	try(function() pyio.save_values(MATERIAL_STORE .. "_names", names) end)
+	try(function() pyio.save_values(MATERIAL_STORE, mats) end)
+end
+
+local function material_name(handle)
+	return handle ~= nil and try(function() return pytha.get_element_name(handle) end) or nil
+end
+
+-- a stored handle may be stale after a restart: use it if it is still a material, else look the name up (V27)
+local function usable_material(mats, key)
+	local handle = mats[key]
+	if handle ~= nil and try(function() return pytha.get_element_type(handle) end) == "material" then return handle end
+	local name = mats[key .. "_name"]
+	if name ~= nil then
+		local found = try(function() return pytha.find_material(name) end)
+		if found ~= nil then mats[key] = found; return found end
+	end
+	return nil
+end
+
+local function apply_material(el, mat)
+	if mat == nil or el == nil then return end
+	if type(el) == "table" then for _, one in ipairs(el) do apply_material(one, mat) end return end
+	try(function() pytha.set_element_material(el, mat) end)
+end
+
 local function setup_models()
 	local models = load_models()
+	local mats = load_materials()
 	local car_label, cube_label
 	local function describe(handle)
 		if handle == nil then return "plain box" end
@@ -133,6 +182,23 @@ local function setup_models()
 			if file ~= nil then models.cube = file; set_label(cube_label, "Obstacle: " .. describe(file)) end
 		end)
 		clear_cube:set_on_click_handler(function() models.cube = nil; set_label(cube_label, "Obstacle: plain box") end)
+		local mat_labels = {}
+		for _, item in ipairs({{"road", "Road"}, {"car", "Car"}, {"ball", "Ball"}}) do
+			local key, title = item[1], item[2]
+			local pick = dlg:create_button(1, title .. " material...")
+			local clear = dlg:create_button(2, title .. ": none")
+			local label = dlg:create_label({1, 2}, title .. " material: " .. (mats[key .. "_name"] or "none"))
+			pick:set_on_click_handler(function()
+				local chosen = try(function() return pyux.select_material() end)
+				if chosen ~= nil then
+					mats[key] = chosen
+					mats[key .. "_name"] = material_name(chosen) or "picked"
+					set_label(label, title .. " material: " .. mats[key .. "_name"])
+				end
+			end)
+			clear:set_on_click_handler(function() mats[key] = nil; mats[key .. "_name"] = nil; set_label(label, title .. " material: none") end)
+			mat_labels[key] = label
+		end
 		local drop = dlg:create_button(1, "Copy models to scene")
 		drop:set_on_click_handler(function()
 			local x = 2000
@@ -153,8 +219,26 @@ local function setup_models()
 	local dropped = models.dropped
 	models.dropped = nil
 	save_models(models)
+	save_materials(mats)
 	if dropped then return nil end
+	models.materials = mats
 	return models
+end
+
+-- delete handles one by one: a single stale or nested handle makes delete_element(list) fail as a whole,
+-- and the try() around it then hides that nothing was deleted
+local function remove_all(list)
+	for _, el in ipairs(list) do
+		if type(el) == "table" then remove_all(el)
+		else try(function() pytha.delete_element(el) end) end
+	end
+end
+
+-- the road cylinder is kept between runs (ROAD.keep_road) so it can be textured: only its length decides if it can be reused
+local kept_road = nil		-- {el = cylinder, lane_w = lane width it was built for}
+
+local function road_still_there()
+	return kept_road ~= nil and try(function() return pytha.get_element_type(kept_road.el) end) ~= nil
 end
 
 local function road_racer()
@@ -162,7 +246,12 @@ local function road_racer()
 	if models == nil then return end
 	local R, lane_w, lanes = ROAD.radius, ROAD.lane_width, ROAD.lanes
 	-- with a car model: lanes just wider than the car, and the crash window from the car's length
-	local car_el = import_model(models.car, ROAD.car_turn)
+	local mats = models.materials or {}
+	local road_mat, car_mat, ball_mat = usable_material(mats, "road"), usable_material(mats, "car"), usable_material(mats, "ball")
+	local spawned = {}		-- every imported part, deleted one by one when the game closes
+	local car_track = {}
+	local car_el = import_model(models.car, ROAD.car_turn, car_track)
+	for _, part in ipairs(car_track) do table.insert(spawned, part) end
 	local hit_degrees = ROAD.hit_degrees
 	local car_size = car_el and model_size(car_el)
 	if car_size then
@@ -173,11 +262,29 @@ local function road_racer()
 	local axis_point = {mm(ROAD.cx), mm(ROAD.cy), mm(R)}
 	local made = {}
 	local state = {lane = 4, score = 0, crashes = 0, rot = 0, speed = 4}
-	-- the road: a cylinder lying along x
-	local road = pytha.create_cylinder(mm(lanes * lane_w), mm(R), {mm(ROAD.cx), mm(ROAD.cy), mm(R)})
-	pytha.rotate_element(road, {mm(ROAD.cx), mm(ROAD.cy), mm(R)}, "y", 90)		-- turn about its own base centre so it stays at x=cx
-	pytha.move_element(road, {-mm(lanes * lane_w / 2), 0, 0})
-	table.insert(made, road)
+	-- the road: a cylinder lying along x. Reused from the last run when it is still in the model and the lane width
+	-- has not changed, so a texture put on it stays; otherwise the old one is removed and a new one built
+	local road
+	if road_still_there() and kept_road.lane_w == lane_w then
+		road = kept_road.el
+	else
+		if road_still_there() then remove_all({kept_road.el}) end
+		kept_road = nil
+		road = pytha.create_cylinder(mm(lanes * lane_w), mm(R), {mm(ROAD.cx), mm(ROAD.cy), mm(R)})
+		pytha.rotate_element(road, {mm(ROAD.cx), mm(ROAD.cy), mm(R)}, "y", 90)		-- turn about its own base centre so it stays at x=cx
+		pytha.move_element(road, {-mm(lanes * lane_w / 2), 0, 0})
+		if ROAD.keep_road then kept_road = {el = road, lane_w = lane_w} else table.insert(made, road) end
+	end
+	if road_mat ~= nil then
+		-- cylinder projection; the tile is twice as long as the road is wide and a whole number of them fit around
+		local width = lanes * lane_w
+		local circumference = 2 * math.pi * R
+		local tiles = math.max(1, math.floor(circumference / (2 * width) + 0.5))
+		local length = circumference / tiles
+		local repeat_size = ROAD.road_turned and {length, width} or {width, length}
+		apply_material(road, road_mat)
+		try(function() pytha.set_element_attributes(road_mat, {texture_mapping = "cylinder", texture_repeat = repeat_size}) end)
+	end
 	-- lane marks: thin strips along the top
 	local rolling = {road}
 	for lane = 1, lanes - 1 do
@@ -196,9 +303,17 @@ local function road_racer()
 	end
 	for index = 1, ROAD.count do
 		local lane = math.random(1, lanes)
-		local el = place_model(models.cube, mm(x0 + (lane - 0.5) * lane_w), mm(ROAD.cy), mm(2 * R), ROAD.cube_turn)
-		if el == nil then
+		local el = place_model(models.cube, mm(x0 + (lane - 0.5) * lane_w), mm(ROAD.cy), mm(2 * R), ROAD.cube_turn, spawned)
+		if el == nil and ROAD.obstacle == "sphere" then
+			local radius = lane_w * 0.3
+			el = pytha.create_sphere(mm(radius), {mm(x0 + (lane - 0.5) * lane_w), mm(ROAD.cy), mm(2 * R + radius)})
+			if ball_mat ~= nil then
+				apply_material(el, ball_mat)
+				try(function() pytha.set_element_attributes(ball_mat, {texture_mapping = "sphere", texture_repeat = {2 * math.pi * radius, math.pi * radius}}) end)
+			end
+		elseif el == nil then
 			el = pytha.create_block(mm(lane_w * 0.6), mm(lane_w * 0.6), mm(lane_w * 0.6), {mm(x0 + (lane - 0.5) * lane_w - lane_w * 0.3), mm(ROAD.cy - lane_w * 0.3), mm(2 * R)})
+			apply_material(el, ball_mat)
 		end
 		local obstacle = {el = el, lane = lane, base = 0}
 		pytha.rotate_element(el, axis_point, "x", ROAD.DIR * (60 + index * 360 / ROAD.count))
@@ -206,8 +321,6 @@ local function road_racer()
 		table.insert(obstacles, obstacle); table.insert(made, el)
 		if type(el) == "table" then for _, part in ipairs(el) do table.insert(obstacle_els, part) end else table.insert(obstacle_els, el) end
 	end
-	local road_group = pytha.create_group(rolling)
-	table.insert(made, road_group)
 	-- the car
 	local car = car_el
 	if car ~= nil then stand_model(car, mm(x0 + (state.lane - 0.5) * lane_w), mm(ROAD.cy), mm(2 * R + 4)) end
@@ -216,6 +329,9 @@ local function road_racer()
 		pytha.set_element_pen(car, 3)
 	end
 	table.insert(made, car)
+	if ROAD.paint_car and car_mat ~= nil then
+		if #car_track > 0 then apply_material(car_track, car_mat) else apply_material(car, car_mat) end
+	end
 	local car_lane = state.lane
 
 	local label
@@ -233,7 +349,7 @@ local function road_racer()
 	local function on_frame(clock)
 		local degrees = ROAD.turn_scale * state.speed * 13 / clock.rate		--per tick, scaled by the measured rate
 		state.rot = (state.rot + degrees) % 360
-		try(function() pytha.rotate_element(road_group, axis_point, "x", ROAD.DIR * degrees) end)
+		try(function() pytha.rotate_element(rolling, axis_point, "x", ROAD.DIR * degrees) end)
 		try(function() pytha.rotate_element(obstacle_els, axis_point, "x", ROAD.DIR * degrees) end)
 		for _, obstacle in ipairs(obstacles) do
 			obstacle.base = obstacle.base + 0		--base is the angle at the last re-place; the group's own rotation is state.rot
@@ -277,8 +393,10 @@ local function road_racer()
 	end
 	pyui.run_modal_subdialog(dialog)
 	clock.stop()
-	try(function() pytha.delete_element(made) end)
-	pyui.alert(string.format("Road Racer: score %d, crashes %d.", state.score, state.crashes))
+	remove_all(made)
+	remove_all(spawned)
+	pyui.alert(string.format("Road Racer: score %d, crashes %d.%s", state.score, state.crashes,
+		kept_road and "\nThe road cylinder stays in the model (texture it, then play again)." or ""))
 end
 
 ----------------------------------------------------------------------------------------------------------------
