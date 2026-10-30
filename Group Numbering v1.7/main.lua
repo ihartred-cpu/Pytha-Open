@@ -1,5 +1,5 @@
 -- Group Numbering v1.7 (2026-10-20 addition) - overlap check: a warning (in the summary and the preview) when two cabinets overlap by 30% or more of the smaller one, e.g. a second run started on top of an existing one. Nothing is moved or deleted.
--- Group Numbering v1.7 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
+-- Group Numbering v1.6 (2026-10-16) - centres and labels now come from the box of the group's PARTS, not the group's own bounding box.
 --   On V26 a group's bounding box also covers its reference points (connection, hinge and handle points), which stretched the box of
 --   cabinets that carry them, moved their centre and put numbers out of order and labels off the cabinet. New dialog option "Use the
 --   parts' own box (ignore reference points)", on by default; untick it for the 1.6 behaviour. The preview shows where reference
@@ -44,6 +44,11 @@
 --   attribute 46 is writable on groups; parts inherit it as attribute 122;
 --   create_text_3d takes (text, height, thickness) only - place it with push_local_coordinates.
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- CONSTANTS - the plugin's tunable knobs, gathered in one place so you don't
+-- have to go hunting through the functions below to change a default.
+-- ────────────────────────────────────────────────────────────────────────────
+
 local LABEL_GROUP_NAME = "Group Numbers"		--all labels live in this one top-level group, never inside the numbered groups
 local LABEL_PREFIX = "Group No. "
 local NAME_SEPARATOR = " #"					--"Base" -> "Base #3"
@@ -52,6 +57,11 @@ local WALL_ROW = 0x2						--Kitchen Wizard row code for wall cabinets
 local OVERLAP_MIN_RATIO = 0.3			--two cabinets count as overlapping when they share this much of the SMALLER one's box (touching faces and thin overlaps do not)
 local OVERLAP_TOL_MM = 2				--an overlap thinner than this on any axis is just two cabinets touching
 
+-- The dialog's starting values, and what gets written to disk between runs
+-- (see load_settings below). Changing a value here only changes what a
+-- brand-new install starts with; existing users keep whatever they last set
+-- in the dialog, because load_settings loads their saved choices on top of
+-- these.
 local DEFAULTS = {
 	start = 1,
 	renumber_all = false,
@@ -67,6 +77,16 @@ local DEFAULTS = {
 	geometry_box = true,		--centres and labels from the box of the group's parts; false = the group's own box (includes reference points)
 }
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- UNITS - PYTHA's own API always works in the document's current length unit
+-- (mm or inch, whichever the user has the document set to). This plugin
+-- stores its own settings internally in millimetres so the numbers in
+-- numbering_settings.* never change meaning if the user later switches the
+-- document's unit; these two helpers convert at the boundary, right where a
+-- value is about to be shown in or read from the dialog.
+-- ────────────────────────────────────────────────────────────────────────────
+
+--millimetres (how this plugin stores lengths) -> the document's current unit (for display/dialog use)
 local function to_doc(v_mm)
 	if pytha.get_length_unit() == "in" then
 		return v_mm / 25.4
@@ -74,6 +94,7 @@ local function to_doc(v_mm)
 	return v_mm
 end
 
+--the document's current unit -> millimetres (for storing)
 local function to_mm(v_doc)
 	if pytha.get_length_unit() == "in" then
 		return v_doc * 25.4
@@ -81,6 +102,12 @@ local function to_mm(v_doc)
 	return v_doc
 end
 
+-- Load this plugin's remembered settings (pyio.load_values is PYTHA's small
+-- per-plugin key/value store, saved between sessions). We start from a FRESH
+-- copy of DEFAULTS and only overwrite a key if the saved value exists AND is
+-- the same Lua type as the default - that way an older save file missing a
+-- newer option (like "facing", added in 1.5) just falls back to the default
+-- for that one option instead of breaking the whole settings table.
 local function load_settings()
 	local settings = {}
 	for key, value in pairs(DEFAULTS) do
@@ -100,6 +127,10 @@ local function load_settings()
 	return settings
 end
 
+-- Read a group's name (PYTHA attribute 3). Wrapped in pcall because some
+-- element kinds can raise an error when you ask for this attribute; if that
+-- happens we just treat the group as having no name ("") rather than letting
+-- the error propagate and abort the whole run.
 local function group_name(group)
 	local call_ok, name_value = pcall(function() return pytha.get_element_attribute(group, 3) end)
 	if call_ok and name_value ~= nil then
@@ -113,6 +144,10 @@ local function base_name(name)
 	return (name:gsub(" #%d+$", ""))
 end
 
+-- Read back a number this plugin may have written to a group on an earlier
+-- run (PYTHA attribute 46, the group's "position number", also shown in the
+-- Parts List). Used so re-running the plugin doesn't renumber everything
+-- from scratch - see the "keep existing numbers" logic in number_groups().
 local function existing_number(group)
 	local call_ok, raw_number = pcall(function() return pytha.get_element_attribute(group, 46) end)
 	if not call_ok or raw_number == nil then
@@ -125,6 +160,10 @@ local function existing_number(group)
 	return nil
 end
 
+-- Find the top-level group(s) named "Group Numbers" that hold this plugin's
+-- own 3D number labels from a previous run (there should normally be at most
+-- one, but we handle more just in case a user merged files or ran an older
+-- version that behaved differently).
 local function find_label_groups()
 	local found = {}
 	for group in pytha.enumerate_groups() do
@@ -135,6 +174,10 @@ local function find_label_groups()
 	return found
 end
 
+-- Delete every "Group Numbers" label group found above, and report how many
+-- were removed. Called both by "Remove number labels" and at the start of
+-- "Number Groups" (so re-running always replaces old labels instead of
+-- stacking new ones on top).
 local function delete_labels()
 	local old = find_label_groups()
 	if #old > 0 then
@@ -143,7 +186,12 @@ local function delete_labels()
 	return #old
 end
 
---the wizard's own data on a kitchen group, or nil for any other group
+-- If `group` is a Kitchen Wizard kitchen, return its own element-history data
+-- (an internal PYTHA table the wizard attaches to the kitchen group, holding
+-- aux_values.cabinet_list - the list of cabinets the wizard generated). For
+-- any ordinary group (not a wizard kitchen) this returns nil, which is how
+-- collect() below tells "one wizard kitchen full of cabinets" apart from
+-- "one plain top-level group that counts as a single item".
 local function wizard_data(group)
 	for _, key in ipairs(WIZARD_HISTORY_KEYS) do
 		local call_ok, data = pcall(function() return pytha.get_element_history(group, key) end)
@@ -154,6 +202,10 @@ local function wizard_data(group)
 	return nil
 end
 
+-- The group's own PYTHA bounding box: {{min_x,min_y,min_z}, {max_x,max_y,max_z}}.
+-- NOTE: on V26 this box also stretches to cover the group's reference points
+-- (connection/hinge/handle points), which is exactly the problem parts_box()
+-- below works around.
 local function bounding_box(group)
 	local call_ok, box = pcall(function() return pytha.get_element_bounding_box(group) end)
 	if call_ok and type(box) == "table" and box[1] ~= nil and box[2] ~= nil then
@@ -164,6 +216,12 @@ end
 
 --the union of the boxes of the group's parts (get_group_descendants, element type "part"), or nil if none is readable. A group's own
 --box also covers its reference points, parts' boxes only cover reference points that sit on the part itself.
+-- In other words: instead of asking PYTHA for the group's own box (which can
+-- balloon out to include invisible reference points), we walk every PART
+-- inside the group, take EACH part's own box, and grow a running min/max
+-- box to cover all of them. The result is the box of the cabinet's actual
+-- material, which is what you want for finding its true centre and for
+-- sizing/placing a label.
 local function parts_box(group)
 	local call_ok, members = pcall(function() return pytha.get_group_descendants(group) end)
 	if not call_ok or type(members) ~= "table" then return nil end
@@ -174,9 +232,11 @@ local function parts_box(group)
 			local part_box = bounding_box(element)
 			if part_box ~= nil then
 				if box_min == nil then
+					-- first part found: this becomes the starting box
 					box_min = {part_box[1][1], part_box[1][2], part_box[1][3]}
 					box_max = {part_box[2][1], part_box[2][2], part_box[2][3]}
 				else
+					-- every later part: grow the running box to also cover it, axis by axis
 					for axis = 1, 3 do
 						if part_box[1][axis] < box_min[axis] then box_min[axis] = part_box[1][axis] end
 						if part_box[2][axis] > box_max[axis] then box_max[axis] = part_box[2][axis] end
@@ -190,6 +250,10 @@ local function parts_box(group)
 end
 
 --the box to measure a group by: the parts' box if wanted and readable, else the group's own. Second value: the group's own box.
+-- Returns TWO boxes: the one actually used for numbering/centring/labelling
+-- (honouring the settings.geometry_box toggle), and the group's own raw box
+-- regardless of the toggle - kept around purely so the preview can show you
+-- how far reference points would have shifted the centre (ref_shift_note).
 local function item_box(group, settings)
 	local full = bounding_box(group)
 	if settings ~= nil and settings.geometry_box then
@@ -204,11 +268,18 @@ end
 local function apply_name(group, name)
 	pcall(function() pytha.set_element_name(group, name) end)
 	if group_name(group) == name then return true end
+	-- set_element_name silently failed for this group - fall back to writing
+	-- the raw "name" attribute (3) directly, which occasionally succeeds where
+	-- the higher-level call doesn't.
 	pcall(function() pytha.set_element_attributes(group, {[3] = name}) end)
 	return group_name(group) == name
 end
 
 --the group's own rotation about its vertical axis, degrees, folded into (-180, 180]; nil if unreadable
+-- "folded into (-180, 180]" means: whatever angle PYTHA reports (which could
+-- be any value, e.g. 370 or -540), we normalise it into one consistent range
+-- so that comparisons and the "run" bucketing in collect() behave the same
+-- way regardless of how PYTHA happened to report the rotation.
 local function group_angle(group, flip)
 	local call_ok, angle = pcall(function() return pytha.get_group_angle(group) end)
 	angle = call_ok and tonumber(angle) or nil
@@ -220,6 +291,10 @@ local function group_angle(group, flip)
 end
 
 --the direction the cabinet faces, as a unit vector in plan: angle 0 faces -y (the old assumption), +90 turns it to face +x
+-- Standard 2D rotation of the vector (0,-1) by angle_deg: this is the
+-- direction the FRONT of the cabinet points towards in the floor plan,
+-- used both to pick which wall-run a cabinet belongs to and to work out
+-- which face of the cabinet a label should sit on/face towards.
 local function facing_vector(angle_deg)
 	local angle_rad = math.rad(angle_deg or 0)
 	return math.sin(angle_rad), -math.cos(angle_rad)
@@ -227,6 +302,26 @@ end
 
 --every group to number: {group, box (the box it is measured by), full (the group's own box), centre_x, centre_y, tier (1 = bases, 2 = uppers),
 --angle_deg, kitchen_angle_deg}
+-- This is the heart of the plugin: it decides WHAT counts as a numberable
+-- item and in WHAT ORDER they should be numbered.
+--
+-- Step 1 - gather candidates: every top-level group in the model (parent ==
+-- nil), except the plugin's own "Group Numbers" label group.
+--
+-- Step 2 - expand kitchens: for each top-level group, check wizard_data(). If
+-- it IS a Kitchen Wizard kitchen, don't number the kitchen itself - instead
+-- walk its cabinet_list and number each individual cabinet inside it (bases
+-- get tier 1, wall/upper cabinets - row == WALL_ROW - get tier 2). If it is
+-- NOT a wizard kitchen, the group itself is the one item (tier 1).
+--
+-- Step 3 - order them: if settings.facing is on, items are grouped into four
+-- "runs" (one per wall direction, walked clockwise: left wall, back wall,
+-- right wall, front wall) using each cabinet's own rotation angle, then
+-- sorted left-to-right WITHIN a run as seen from the front of the cabinets
+-- (the "along" value is the cabinet's centre projected onto its own facing
+-- direction). If settings.facing is off, it falls back to the simpler v1.1
+-- behaviour: plain left-to-right by x coordinate.
+-- Either way, bases (tier 1) are always listed before uppers (tier 2).
 local function collect(settings)
 	local items, skipped, kitchens = {}, 0, 0
 	local use_facing = settings ~= nil and settings.facing
@@ -240,11 +335,15 @@ local function collect(settings)
 	for _, group in ipairs(top) do
 		local data = wizard_data(group)
 		if data ~= nil then
+			-- it's a Kitchen Wizard kitchen: expand it into its individual cabinets
 			kitchens = kitchens + 1
 			for _, spec in pairs(data.aux_values.cabinet_list) do
 				local cab = type(spec) == "table" and type(spec.aux_values) == "table" and spec.aux_values.main_group or nil
 				local in_kitchen = false
 				if cab ~= nil then
+					-- sanity check: make sure this cabinet group is actually still
+					-- inside the kitchen group (it could have been moved out, or the
+					-- wizard's history could be stale after manual edits)
 					pcall(function() in_kitchen = (pytha.get_element_parent_group(cab) == group) end)
 				end
 				local box, full
@@ -258,6 +357,7 @@ local function collect(settings)
 				end
 			end
 		else
+			-- a plain top-level group: it counts as one item on its own (tier 1 = base/other)
 			local box, full = item_box(group, settings)
 			if box ~= nil then
 				table.insert(items, {group = group, box = box, full = full, centre_x = (box[1][1] + box[2][1]) / 2, centre_y = (box[1][2] + box[2][2]) / 2, tier = 1,
@@ -272,6 +372,13 @@ local function collect(settings)
 		--back wall, facing -x = right wall, facing +y = front wall), then left to right as seen from the front of the cabinets.
 		for _, entry in ipairs(items) do
 			local angle = entry.angle_deg or 0
+			-- Bucket each cabinet into one of the four 90-degree "wall runs" in
+			-- clockwise order. (90 - angle) rotates our reference frame so that
+			-- facing +x (left wall) comes out as run 0, facing -y (back wall) as
+			-- run 90, and so on; rounding with +0.5 before the integer division
+			-- keeps a cabinet that's a degree or two off a clean 0/90/180/270 in
+			-- the run its angle is closest to, rather than flipping to the next
+			-- run on a tiny rounding error.
 			entry.run = math.floor(((90 - angle) % 360) + 0.5) % 360
 			local angle_rad = math.rad(angle)
 			entry.along = entry.centre_x * math.cos(angle_rad) + entry.centre_y * math.sin(angle_rad)		--position along the cabinet's own left-to-right direction
@@ -280,7 +387,7 @@ local function collect(settings)
 			if first.tier ~= second.tier then return first.tier < second.tier end
 			if first.run ~= second.run then return first.run < second.run end
 			if math.abs(first.along - second.along) > 1e-6 then return first.along < second.along end
-			return first.box[1][3] < second.box[1][3]
+			return first.box[1][3] < second.box[1][3]		--final tie-break: bottom to top
 		end)
 		return items, skipped, kitchens
 	end
@@ -298,6 +405,13 @@ end
 --numbers and their labels overprint. Compares the boxes the items are measured by (the parts' boxes); returns {first, second, ratio}
 --index pairs into items, ratio = shared volume / volume of the smaller box. A blind corner's L shape is measured by its square box, so a
 --neighbour tucked into the blind part can be flagged: it is a warning, nothing is changed.
+-- For every PAIR of items, this intersects their two boxes axis by axis
+-- (standard axis-aligned-bounding-box overlap test: the overlap on each axis
+-- is max(low1,low2)..min(high1,high2); if that range is non-positive on any
+-- axis - beyond OVERLAP_TOL_MM of touching - the boxes don't truly overlap in
+-- 3D at all). If they do overlap on all three axes, the shared volume is
+-- compared against the SMALLER of the two boxes' own volumes; if that ratio
+-- is at least OVERLAP_MIN_RATIO (30%), it's reported as a likely duplicate.
 local function find_overlaps(items)
 	local found = {}
 	local tolerance = to_doc(OVERLAP_TOL_MM)
@@ -325,6 +439,10 @@ local function find_overlaps(items)
 end
 
 --text lines for the overlaps; describe(entry, index) names one side
+-- `describe` is a small callback so this one function can produce lines for
+-- BOTH the preview (where items don't have numbers yet, so they're named by
+-- row position) and the final summary (where items DO have numbers, so
+-- they're named by their assigned number) without duplicating this logic.
 local function overlap_lines(items, found, describe)
 	local lines = {}
 	if #found == 0 then return lines end
@@ -332,6 +450,7 @@ local function overlap_lines(items, found, describe)
 	for pair_number, pair in ipairs(found) do
 		table.insert(lines, string.format("  %s and %s share %d%% of the smaller cabinet", describe(items[pair.first], pair.first), describe(items[pair.second], pair.second), math.floor(pair.ratio * 100 + 0.5)))
 		if pair_number >= 8 then
+			-- don't let one messy file turn the alert box into a huge wall of text
 			table.insert(lines, "  ... " .. (#found - 8) .. " more")
 			break
 		end
@@ -339,6 +458,10 @@ local function overlap_lines(items, found, describe)
 	return lines
 end
 
+-- Builds the options dialog for "Number Groups". `dialog` is PYTHA's dialog-
+-- builder object; `settings` is the live settings table (loaded by
+-- load_settings, mutated in place by the control callbacks below, and saved
+-- back to disk by number_groups() once the user clicks OK).
 function numbering_dialog(dialog, settings)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_standalone_label({1, 2}, pyloc "Bases, then uppers, in order round the room (by facing). Existing numbers are kept.")
@@ -397,6 +520,11 @@ function numbering_dialog(dialog, settings)
 		end
 	end)
 
+	-- The pen (colour) picker is a checkbox + a drop-list. The checkbox is the
+	-- on/off toggle (settings.pen == 0 means "leave PYTHA's current pen
+	-- alone"); the drop-list remembers the last pen chosen (pen_choice) even
+	-- while the checkbox is unticked, so re-ticking it restores your last pick
+	-- instead of resetting to pen 1.
 	local pen_check = dialog:create_check_box(1, pyloc "Label pen (colour)")
 	pen_check:set_control_checked(settings.pen > 0)
 	local pen = dialog:create_pen_list(2)
@@ -419,6 +547,9 @@ function numbering_dialog(dialog, settings)
 	end)
 	if settings.pen == 0 then pen:disable_control() end
 
+	-- The label-related controls (height/layer/pen) only make sense when
+	-- "Place 3D number labels" is ticked, so this greys them out together
+	-- whenever that checkbox is off.
 	local function enable_label_options(state)
 		if state then
 			height:enable_control(); layer:enable_control(); pen_check:enable_control()
@@ -438,6 +569,19 @@ function numbering_dialog(dialog, settings)
 	dialog:equalize_column_widths({1, 2})
 end
 
+-- Creates one 3D text label (the cabinet's number) standing upright on the
+-- front face of its box, facing the same way the cabinet does.
+--
+-- The geometry: `across` is the left-to-right direction as seen from the
+-- front of the cabinet (used to orient and later centre the text), `front`
+-- is the direction the cabinet's front face points towards (used to find
+-- where the front face is and to tilt the label to face outward). half_depth
+-- projects the box's half-size onto the front direction, which is how we
+-- find the front face regardless of which way the box happens to be
+-- rotated. push_local_coordinates/pop_local_coordinates temporarily moves
+-- PYTHA's working coordinate system to this custom orientation so
+-- create_text_3d (which always writes text flat along its own local axes)
+-- comes out upright and correctly rotated in world space.
 local function place_label(text, entry, settings)
 	local box = entry.box
 	local label_height = to_doc(settings.label_height_mm)
@@ -472,6 +616,10 @@ local function place_label(text, entry, settings)
 		end
 	end)
 	if not ok_steps then
+		-- something after the text was created failed (e.g. couldn't set the
+		-- layer/pen) - clean up the half-finished label rather than leaving an
+		-- orphaned 3D text object floating in the model, then re-raise so the
+		-- caller in number_groups() can count it as a failure.
 		pcall(pytha.delete_element, label)
 		error(steps_error, 0)
 	end
@@ -487,16 +635,31 @@ local function ref_shift_note(entry)
 	return string.format("   (reference points would shift the centre by %.1f, %.1f)", front_x, front_y)
 end
 
+-- MAIN ACTION: "Number Groups". Shows the options dialog, then either just
+-- previews the order (changes nothing) or actually numbers/renames/labels
+-- every cabinet, in five stages:
+--   1. collect() every item and decide the order (see collect() above)
+--   2. decide numbers: keep each item's existing number if it still has one
+--      and that number hasn't already been claimed by an earlier item in the
+--      list; otherwise hand out the next free number above the highest one
+--      in use
+--   3. write attribute 46 (position number) on every item's group
+--   4. optionally rewrite the group's name and/or place a 3D label
+--   5. build and show a plain-text summary, including any overlap warnings
 function number_groups()
 	local settings = load_settings()
 	if pyui.run_modal_subdialog(numbering_dialog, settings) ~= "ok" then
-		return
+		return		-- user cancelled the dialog: do nothing at all
 	end
 	local renumber_all = settings.renumber_all
-	settings.pen_choice = nil
+	settings.pen_choice = nil		--a UI-only scratch value; never worth persisting
 	pyio.save_values("numbering_settings", settings)
 
 	if settings.preview then
+		-- PREVIEW MODE: run the same collect() the real pass would use, but
+		-- only print what the order/angles/centres would be - nothing in the
+		-- model is touched. This is how you sanity-check "facing" and "flip the
+		-- angle sign" before committing to a real run.
 		local pitems = collect(settings)
 		local rows = {pyloc "Group Numbering - preview (nothing changed)", "unit " .. pytha.get_length_unit() .. "; facing " .. (settings.facing and "on" or "off") .. (settings.flip_angle and ", angle flipped" or ""), ""}
 		for row_number, entry in ipairs(pitems) do
@@ -515,9 +678,13 @@ function number_groups()
 			for _, row in ipairs(overlap_rows) do table.insert(rows, row) end
 		end
 		pyui.alert(table.concat(rows, "\n"))
+		-- also drop a copy in PYTHA's scratch folder, so a long preview that
+		-- scrolled off the alert box can still be read afterwards
 		pcall(function() pyio.write_lines(pyio.get_scratch_folder_path("group_numbering_preview.txt"), rows) end)
 		return
 	end
+	-- REAL RUN starts here: clear any labels from a previous run first, so this
+	-- run's labels never stack on top of stale ones.
 	local removed = delete_labels()
 	local items, skipped, kitchens = collect(settings)
 	if #items == 0 then
@@ -530,6 +697,12 @@ function number_groups()
 	local used, kept = {}, 0
 	local highest = settings.start - 1
 	if not renumber_all then
+		-- First pass: walk items in order and let each one keep its OLD number,
+		-- but only if that number hasn't already been claimed by an earlier
+		-- item in the list (so if two items somehow share a stale number, the
+		-- leftmost/earliest one wins it and the other gets treated as unnumbered
+		-- below). Also tracks `highest`, the biggest number already in use, so
+		-- new numbers start above it rather than colliding.
 		for _, entry in ipairs(items) do
 			local number = existing_number(entry.group)
 			if number ~= nil and not used[number] then
@@ -540,6 +713,9 @@ function number_groups()
 			end
 		end
 	end
+	-- Second pass: give every item that didn't keep an old number the next
+	-- free integer above `highest`, skipping any number already claimed in
+	-- the first pass.
 	local next_free = highest + 1
 	local assigned = 0
 	for _, entry in ipairs(items) do
@@ -552,6 +728,10 @@ function number_groups()
 		end
 	end
 
+	-- Now actually write the results into the model: the position-number
+	-- attribute always, the name and the 3D label only if those options are
+	-- ticked. Every step is counted so the summary at the end can tell the
+	-- user exactly what happened and what (if anything) didn't stick.
 	local failed, renamed, labels, label_errors = 0, 0, {}, 0
 	local rename_failed, rename_example = 0, nil
 	for _, entry in ipairs(items) do
@@ -578,9 +758,14 @@ function number_groups()
 		end
 	end
 	if #labels > 0 then
+		-- gather every label this run created into one top-level group, named
+		-- LABEL_GROUP_NAME, so find_label_groups()/delete_labels() can find and
+		-- remove them all together on the next run or on "Remove number labels"
 		pytha.create_group(labels, {name = LABEL_GROUP_NAME})
 	end
 
+	-- Build the plain-text result message shown in the alert box, piece by
+	-- piece depending on which options were used and whether anything failed.
 	local bases, uppers = 0, 0
 	for _, entry in ipairs(items) do
 		if entry.tier == 2 then uppers = uppers + 1 else bases = bases + 1 end
@@ -617,6 +802,10 @@ function number_groups()
 	pyui.alert(table.concat(msg, "\n"))
 end
 
+-- "Remove number labels" action: deletes the 3D labels only. Position
+-- numbers (attribute 46) and group names are left untouched, so the
+-- underlying numbering survives even if you don't want the 3D text in the
+-- model right now.
 function remove_labels()
 	local removed = delete_labels()
 	if removed > 0 then
@@ -629,8 +818,16 @@ end
 --============================================================
 -- The one menu entry: a picker for the actions
 --============================================================
+-- PYTHA's plugin sidebar only shows a limited number of entries in total, so
+-- rather than registering "Number Groups" and "Remove number labels" as two
+-- separate plugin menu items, this plugin registers ONE entry
+-- (numbering_launcher, below) that opens a small picker dialog letting the
+-- user choose which of the two actions to run. The picker remembers the last
+-- action chosen (LAUNCHER_STORE) so it defaults to whatever you used last
+-- time.
 local LAUNCHER_STORE = "Group_numbering_launcher"
 
+-- The list of {caption, function_to_call, description} the picker offers.
 local function launcher_actions()
 	return {
 		{pyloc "Number Groups", number_groups, pyloc "Number every top-level group in order round the room and (optionally) label it. Run again after any change - old labels are replaced."},
@@ -638,6 +835,9 @@ local function launcher_actions()
 	}
 end
 
+-- Builds the small picker dialog: a drop-list of action names, plus a label
+-- underneath that updates to show that action's description as you change
+-- the selection.
 local function launcher_dialog(dialog, launcher)
 	dialog:set_window_title(pyloc "Group Numbering 1.7")
 	dialog:create_label(1, pyloc "Action")
@@ -650,6 +850,8 @@ local function launcher_dialog(dialog, launcher)
 	list:set_on_change_handler(function(text, index)
 		local chosen_index = tonumber(index)
 		if chosen_index == nil then
+			-- some PYTHA versions report the change by text instead of index;
+			-- fall back to matching the caption text against the action list
 			for action_index, action in ipairs(launcher.actions) do
 				if action[1] == text then chosen_index = action_index end
 			end
@@ -664,6 +866,9 @@ local function launcher_dialog(dialog, launcher)
 	dialog:equalize_column_widths({1, 2})
 end
 
+-- This is the function PYTHA's plugin sidebar actually calls (the single
+-- registered entry-point, see config.xml). It shows the picker, remembers
+-- which action was last chosen, and then calls that action's function.
 function numbering_launcher()
 	local launcher = {pick = 1, actions = launcher_actions()}
 	local ok_load, saved = pcall(function() return pyio.load_values(LAUNCHER_STORE) end)

@@ -1,10 +1,42 @@
 <!doctype html>
+<!--
+  pymat from Textures - a single-file, no-build, runs-entirely-in-the-browser tool for building PYTHA
+  material libraries (.pymat files) out of folders of texture images.
+
+  WHY THIS EXISTS AS ONE HTML FILE: it's the browser port of pymat_from_textures_shareable.py (see the
+  Texture Folder to .pymat/README.md and that script's own big header comment for the .pymat XML format
+  background). Being a single .html file with no server and no install means anyone on the team can just
+  double-click it and use it - no Python, no pip install, nothing to set up. It reads folders using the
+  File System Access API (window.showDirectoryPicker, Chrome/Edge) when available, falling back to a plain
+  <input type=file webkitdirectory> folder picker (which can read a folder but not write back into it,
+  so in that fallback mode the finished .pymat downloads as a file instead).
+
+  HOW THE PAGE IS LAID OUT (see the numbered <section> cards further down):
+    1. "Choose what to make" - pick a mode (add to an existing library, or build a fresh one from one
+       folder of swatches) and point the tool at a folder.
+    2. "Review the materials" - a table of every material the tool is about to create, with its matched
+       colour/bump maps, a live thumbnail preview, an editable name, and a checkbox to skip it. Plus some
+       global options (bump-slot preference, name clean-up, rotate images, tile size from the filename,
+       material "look" presets).
+    3. A fixed bottom bar with the Create button, which runs everything and reports what happened.
+
+  HOW THE CODE IS ORGANISED (see the matching banner comments inside <script> below):
+    - core (port of the python script): scanning file names into texture sets, matching colour maps to
+      their bump/roughness/height partners, building each material's name, and writing the raw .pymat XML.
+    - preview thumbnail: draws the little textured-sphere-on-a-checkerboard icon shown per material.
+    - UI state: the one `S` object that holds everything about the current folder/plan, and the functions
+      that turn it into what's on screen (the review table, the status bar).
+    - wiring: right at the end, the event listeners that connect the HTML controls to all of the above.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pymat from Textures</title>
 <style>
+/* Colour tokens only - every rule below reads colours from these custom properties, swapped for a dark
+   palette automatically under prefers-color-scheme:dark, so nothing else in the stylesheet needs a
+   separate dark-mode rule. */
 :root{
   --bg:#f6f4ef; --card:#ffffff; --ink:#1d1b17; --muted:#6b665c; --line:#e1ddd2;
   --accent:#9a5b1e; --accent-ink:#ffffff; --accent-soft:#f3e6d6;
@@ -27,10 +59,12 @@ header.wrap{padding-top:28px;padding-bottom:8px}
 h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
 .lede{margin:0;color:var(--muted);max-width:62ch}
 main{padding-bottom:110px}
+/* one numbered step of the workflow */
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:16px}
 h2{font-size:17px;margin:0 0 12px;display:flex;align-items:center;gap:10px}
 h2 .n{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent);color:var(--accent-ink);font-size:13px;font-weight:700}
 h3{font-size:14px;margin:18px 0 8px}
+/* the "sync" vs "folder" mode radio cards, step 1 */
 .modes{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 @media(max-width:640px){.modes{grid-template-columns:1fr}}
 .mode{display:block;border:2px solid var(--line);border-radius:10px;padding:12px 14px;cursor:pointer;position:relative}
@@ -39,6 +73,7 @@ h3{font-size:14px;margin:18px 0 8px}
 .mode span{display:block;color:var(--muted);font-size:13.5px;margin-top:2px}
 .mode:has(input:checked){border-color:var(--accent);background:var(--accent-soft)}
 .mode:has(input:focus-visible){outline:3px solid var(--accent);outline-offset:2px}
+/* the folder drop zone */
 .drop{border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;transition:background .15s,border-color .15s}
 .drop.over{border-color:var(--accent);background:var(--accent-soft)}
 .drop p{margin:8px 0 0;color:var(--muted);font-size:13.5px}
@@ -49,6 +84,7 @@ h3{font-size:14px;margin:18px 0 8px}
 .btn:disabled{opacity:.45;cursor:not-allowed;filter:none}
 .btn.small{padding:4px 10px;font-size:13px;font-weight:500}
 .note{color:var(--muted);font-size:13.5px}
+/* inline status/warning/error banners (setMsgs() below fills these in) */
 .msg{border-radius:8px;padding:10px 12px;margin-top:12px;font-size:14px}
 .msg.warn{background:var(--warn-bg);color:var(--warn)}
 .msg.err{background:var(--err-bg);color:var(--err)}
@@ -60,6 +96,7 @@ label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mu
 select,input[type=text]{font:inherit;color:var(--ink);background:var(--field);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
 select:focus,input[type=text]:focus{outline:2px solid var(--accent);outline-offset:0}
 .chk{display:flex;gap:8px;align-items:center;font-size:14px}
+/* the review table, step 2 */
 .tablewrap{margin-top:14px;border:1px solid var(--line);border-radius:10px;overflow:auto;max-height:62vh}
 table{border-collapse:collapse;width:100%;min-width:640px}
 th,td{padding:7px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -72,6 +109,7 @@ td.name input{width:100%}
 td select{width:100%;max-width:280px}
 td.name input.dup{border-color:var(--warn)}
 td .fn{font-size:12.5px;color:var(--muted);word-break:break-all}
+/* the fixed bottom action bar */
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--card);border-top:1px solid var(--line);padding:12px 16px;z-index:5}
 .look{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:12px}
 .look .f input[type=range]{width:150px}
@@ -91,6 +129,7 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
 </header>
 
 <main class="wrap">
+  <!-- STEP 1: pick a mode (add-to-existing vs. new-from-folder) and point at a texture folder -->
   <section class="card" id="s1">
     <h2><span class="n">1</span> Choose what to make</h2>
     <div class="modes" role="radiogroup">
@@ -118,6 +157,7 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
     <div id="s1msgs"></div>
   </section>
 
+  <!-- STEP 2: the plan this tool worked out (renderTable() below), plus the options that affect it -->
   <section class="card" id="s2" hidden>
     <h2><span class="n">2</span> Review the materials</h2>
     <div class="row">
@@ -168,9 +208,11 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
     <p class="note" id="skipInfo" style="margin-bottom:0"></p>
   </section>
 
+  <!-- STEP 3: filled in by create() below once the .pymat has been written (or the run failed/was cancelled) -->
   <section id="s3msgs"></section>
 </main>
 
+<!-- fixed bottom bar: live status text + the Create/Cancel buttons -->
 <div class="bar" id="bar" hidden>
   <div class="in">
     <div id="status" role="status"></div>
@@ -188,7 +230,10 @@ footer.wrap{color:var(--muted);font-size:12.5px;padding-bottom:30px}
 <script>
 'use strict';
 /* ================================================================== core (port of pymat_from_textures_shareable.py) */
+// Recognised image extensions - anything else in a scanned folder is ignored.
 const IMG = new Set(['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp']);
+// Which "kind" of texture map a filename describes, checked in this order (see classify() below). Each
+// entry is [kind_name, regex_that_matches_the_map_word_in_a_filename].
 const KINDS = [
   ['normal', /normal(gl|dx)?|nrm|(^|[_\-. ])norm($|[_\-. ])/i],
   ['ao',     /ambientocclusion|(^|[_\-. ])ao($|[_\-. ])|occlusion/i],
@@ -199,8 +244,12 @@ const KINDS = [
   ['bump',   /bump/i],
   ['color',  /base[_\-. ]?colou?r|albedo|diffuse|colou?r|(^|[_\-. ])d($|[_\-. ])/i],
 ];
+// Human-readable labels for the three map kinds this tool can actually wire into PYTHA's bump slot
+// (shown in the review table's "Bump slot" dropdown).
 const KIND_LABEL = { rough: 'Roughness', bump: 'Bump', height: 'Height' };
 
+// small path-string helpers (everything here works on "/"-joined relative paths, never real filesystem
+// APIs, since paths are compared/manipulated long before any file is actually read)
 const extOf = f => { const i = f.lastIndexOf('.'); return i < 0 ? '' : f.slice(i).toLowerCase(); };
 const baseName = p => p.slice(p.lastIndexOf('/') + 1);
 const dirName = p => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); };
@@ -211,6 +260,10 @@ const stemOf = f => { const i = f.lastIndexOf('.'); return i <= 0 ? f : f.slice(
 const LETTER_KINDS = { d: 'color', n: 'normal', b: 'bump', r: 'rough', h: 'height' };
 /* -> [kind, start, length] of the map word. The word nearest the END of the name wins, because the map type
    comes last in vendor names ("Aluminium_Metal_Sheet_Base_color" is a colour map, not a metalness map). */
+// Works out what kind of texture map a filename's stem (name without extension) describes. First checks
+// the single-letter vendor suffix (see LETTER_KINDS above); if that doesn't match, scans every KINDS
+// pattern over the whole stem and keeps whichever match ends FURTHEST to the right - the rightmost match
+// wins because the map-type word is conventionally the last thing in a vendor's filename.
 function classify(stem) {
   const m = /[_\-.]([dnbrh])$/i.exec(stem);
   if (m) return [LETTER_KINDS[m[1].toLowerCase()], m.index, m[0].length];
@@ -223,16 +276,29 @@ function classify(stem) {
   }
   return best || [null, 0, 0];
 }
+// Tidy up a raw filename stem into a readable label: collapse separator characters (_ - . # and spaces)
+// into single spaces and trim.
 const clean = s => s.replace(/[_\-.# ]+/g, ' ').replace(/\s+/g, ' ').trim();
+// Title-case a string (handles unicode letters via the \p{L}/\p{N} Unicode property escapes).
 const title = s => s.toLowerCase().replace(/(^|[^\p{L}\p{N}])(\p{L})/gu, (m, a, b) => a + b.toUpperCase());
 
 /* paths: array of paths relative to the texture folder -> Map "dir|key" -> {dir,key,maps,stem} */
+// A folder literally named "textures", "maps", "source" etc. carries no useful information of its own -
+// niceDir climbs back up past any such generic folder name to find the actual material/product folder
+// name to use in an auto-generated material name.
 const GENERIC_DIR = /^(textures?|tex|maps?|images?|imgs?|jpe?gs?|pngs?|source|materials?)$/i;
 function niceDir(d) {            // a folder just called "textures" is named after the folder above it
   const parts = d.split('/').filter(Boolean);
   while (parts.length > 1 && GENERIC_DIR.test(parts[parts.length - 1])) parts.pop();
   return parts.length ? parts[parts.length - 1] : '';
 }
+// THE SCANNER. Walks every image path, classifies it (classify() above), and groups images that belong
+// to the SAME texture set under one key: "<folder>|<cleaned-up name with the map word removed>". So
+// "oak_basecolor.jpg" and "oak_roughness.jpg" both reduce to the key "oak" in the same folder and end up
+// in the same set, with maps.color and maps.rough pointing at their respective files.
+// `plain` (true only in "folder" / standalone mode) additionally accepts images with NO recognisable map
+// word at all, treating each one as its own single-image "swatch" material - this is what lets a plain
+// vendor swatch folder (where every image is just a colour name, no "_basecolor" suffix) still work.
 function scan(paths, plain) {
   const sets = new Map();
   for (const rel of paths) {
@@ -258,11 +324,19 @@ function scan(paths, plain) {
   return sets;
 }
 
+// Which map kinds to try, in priority order, for the bump slot - depends on the "Bump slot uses" dropdown.
 function bumpOrder(pref) {
   return pref === 'rough' ? ['rough', 'bump', 'height'] : pref === 'height' ? ['height', 'bump', 'rough'] : ['bump', 'height', 'rough'];
 }
 
 /* -> {items, skipped}; items are what the review table shows */
+// Turns the raw scan() output into the actual list of materials to offer (one row per material in the
+// review table). Groups texture sets by folder; in "folder" mode, first runs attachMaps() per folder to
+// pair up colour images with same-folder bump/height/roughness maps that didn't share an exact name key.
+// Sets already covered by an existing library (`used`, only non-empty in "sync" mode) are counted as
+// `skipped` rather than offered again. A lone unlabelled image sitting in the same folder as real,
+// recognisable texture sets is assumed to be a preview render rather than a real material, and starts
+// unticked (`include: false`) in the review table so the user has to deliberately opt it in.
 function planMaterials(sets, used, standalone, strip, bumpPref) {
   const byDir = new Map();
   for (const s of sets.values()) { if (!byDir.has(s.dir)) byDir.set(s.dir, []); byDir.get(s.dir).push(s); }
@@ -290,6 +364,12 @@ function planMaterials(sets, used, standalone, strip, bumpPref) {
    Cleaf-Alpaca-FC43.jpg), so exact-name pairing finds nothing. In one folder:
    1. a map whose name matches a colour image (ignoring - _ . and spaces) belongs to that image;
    2. a colour image that still has no bump/height/roughness shares the folder's unpaired map. */
+// `list` is every texture set scan() found within ONE folder. First pass: for each colour image, look for
+// a map-only file (no colour map of its own) whose normalised name (letters/digits only, case-insensitive
+// - see nk()) matches the colour image's own key; if found, borrow its bump/height/rough maps. Second
+// pass: any colour image STILL missing a bump map gets assigned whichever unclaimed map-only file in the
+// folder matches the bump-slot priority order (bumpOrder() above) - this is the "one shared bump map for
+// the whole folder" fallback the big comment above describes.
 function attachMaps(list, order) {
   const MAPK = ['bump', 'height', 'rough'];
   const nk = s => s.key.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -315,6 +395,9 @@ function attachMaps(list, order) {
   }
 }
 
+// Works out the default name to offer for one material row (the user can always type over it in the
+// table; see renameAll() further down, which recomputes this whenever a naming OPTION changes but leaves
+// any name the user has personally edited alone).
 function autoName(it, standalone, strip) {
   const base = it.dir ? niceDir(it.dir) : '';
   let name;
@@ -337,19 +420,34 @@ function autoName(it, standalone, strip) {
   }
   return cleanName(name);
 }
+// Final safety net on any material name: strip XML-unsafe characters, collapse whitespace, and never
+// return an empty string (PYTHA needs SOME name).
 const cleanName = n => (n.replace(/[<>&"]/g, '').replace(/\s+/g, ' ').trim()) || 'Material';
 
+// Turns a relative path into a proper relative URL for the .pymat's <source url="..."> links: percent-
+// encodes each path SEGMENT individually (so a literal "/" in a folder name is never itself encoded) and
+// additionally escapes a few characters encodeURIComponent leaves alone but XML attribute values don't like.
 const urlFor = rel => './' + rel.split('/').map(p => encodeURIComponent(p).replace(/[!'()*]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase())).join('/');
+// decodeURIComponent throws on a malformed percent-escape; this just gives back the original string in
+// that case rather than letting the whole scan blow up on one odd filename.
 const safeDecode = s => { try { return decodeURIComponent(s); } catch (e) { return s; } };
 
 /* tile size from a vendor name such as "...-100x32cm_d" -> [u, v] in inches, or null */
+// Looks for a "<number> x <number> <unit>" pattern in a filename (vendors often encode the real physical
+// tile size this way) and converts it to inches - PYTHA's texture-size attribute is written in inches
+// regardless of the document's own unit (see UNIT_PER_INCH and its use in create() below).
 function sizeFromName(file) {
   const m = /(\d+(?:[.,]\d+)?)\s*[x\u00d7]\s*(\d+(?:[.,]\d+)?)\s*(mm|cm|m|in)(?![a-z])/i.exec(file);
   if (!m) return null;
   const f = { mm: 1 / 25.4, cm: 1 / 2.54, m: 1 / 0.0254, in: 1 }[m[3].toLowerCase()];
   return [parseFloat(m[1].replace(',', '.')) * f, parseFloat(m[2].replace(',', '.')) * f];
 }
+// Conversion factor from an existing library's own <length> unit (read in readLibrary() below) to inches.
 const UNIT_PER_INCH = { inch: 1, inches: 1, in: 1, mm: 25.4, millimeter: 25.4, millimeters: 25.4, cm: 2.54, centimeter: 2.54, centimeters: 2.54, m: 0.0254, meter: 0.0254, meters: 0.0254 };
+// Builds the raw <material> XML block for one material, as an array of text lines (joined by the caller).
+// This is the browser-side equivalent of the Python script's XML-writing code: same attribute IDs (the
+// numbers like 1000001, 1000002... are PYTHA's own internal attribute-slot IDs, reverse-engineered from
+// real .pymat files - see the python script's header for how they were worked out), same structure.
 function materialXml(name, mid, colorAid, bumpAid, previewB64, size) {
   const L = [], a = s => L.push(s);
   a(`    <material name="${name}" id="${mid}">`);
@@ -391,19 +489,27 @@ function materialXml(name, mid, colorAid, bumpAid, previewB64, size) {
 }
 
 /* material look: PYTHA stores Matte as <diffuse>, Specularity as <reflective> and the highlight shape as a 13-point <gloss-curve> */
+// Starting points for the "Material look" preset dropdown; "custom" instead reads the three sliders live.
 const LOOKS = {
   matte: { matte: 0.8, spec: 0,    hi: 0.4 },
   satin: { matte: 0.8, spec: 0.04, hi: 0.5 },
   gloss: { matte: 0.8, spec: 0.15, hi: 1 },
 };
 const CURVE = [1, 0.95, 0.85, 0.7, 0.4, 0.2, 0.1, 0.05, 0, 0, 0, 0, 0];   // PYTHA's own default highlight shape
+// Round to 4 decimal places and format as a plain string (PYTHA's XML numbers don't use exponent notation).
 const r4 = n => String(Math.round(n * 10000) / 10000);
+// Reads the current "Material look" UI state into the {matte, spec, curve} values materialXml() writes,
+// or null if "Leave as PYTHA default" is selected (in which case those attributes are omitted entirely
+// rather than written with some fabricated default).
 function lookValues() {
   const m = $('look').value;
   if (m === 'none') return null;
   const v = m === 'custom' ? { matte: +$('lookMatte').value, spec: +$('lookSpec').value, hi: +$('lookHi').value } : LOOKS[m];
   return { matte: r4(v.matte), spec: r4(v.spec), curve: CURVE.map(c => r4(c * v.hi)) };
 }
+// Keeps the look-related UI controls consistent: when a preset is picked (fromPreset=true), copies that
+// preset's values into the custom sliders too (so switching to "Custom..." afterwards starts from
+// something sensible); always refreshes the visible numeric readouts and shows/hides the custom sliders.
 function syncLook(fromPreset) {
   const m = $('look').value;
   if (fromPreset && LOOKS[m]) { $('lookMatte').value = LOOKS[m].matte; $('lookSpec').value = LOOKS[m].spec; $('lookHi').value = LOOKS[m].hi; }
@@ -414,9 +520,14 @@ function syncLook(fromPreset) {
   $('bumpAngleV').textContent = ' ' + $('bumpAngle').value + '\u00b0';
 }
 
+// Builds the <assets> XML for a list of [asset_id, relative_path] pairs - one per image actually used by
+// the selected materials (a colour map and, if present, a bump/height/roughness map).
 const assetsXml = list => list.map(([aid, rel]) =>
   `    <asset id="${aid}">\n      <source url="${urlFor(rel)}" />\n      <a:attributes></a:attributes>\n    </asset>\n`).join('');
 
+// The empty .pymat XML shell used only in "folder" (standalone) mode, when there's no existing library to
+// splice new materials into - this is the whole file minus the actual <material>/<asset> entries, which
+// get string-replaced in just before writing (see create() below).
 function skeleton() {
   const d = new Date().toISOString().replace(/\.\d+Z$/, '.000Z');
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -442,10 +553,18 @@ function skeleton() {
 }
 
 /* ================================================================== preview thumbnail (textured sphere on a checkerboard) */
+// Renders the little round preview thumbnail PYTHA itself shows for a material: the texture mapped onto a
+// sphere with simple directional lighting (so you can judge brightness/contrast at a glance), sitting on
+// a checkerboard background. Done manually pixel-by-pixel (rather than, say, relying on a 3D/WebGL
+// library) because it only needs to run once per material and keeps this whole tool dependency-free.
+// Renders at SS times the final resolution and downscales at the end for cheap anti-aliasing.
 async function renderPreview(file, N = 135, SS = 3) {
   let bmp;
   try { bmp = await createImageBitmap(file); } catch (e) { return null; }
   try {
+    // First, resample the source image down to a 256x256 square (cropped to
+    // its shorter side) - this is the texture that gets sampled per-pixel
+    // below, kept small so the per-pixel sphere loop stays fast.
     const w = bmp.width, h = bmp.height, m = Math.min(w, h);
     const tc = document.createElement('canvas'); tc.width = tc.height = 256;
     const tg = tc.getContext('2d', { willReadFrequently: true });
@@ -453,24 +572,30 @@ async function renderPreview(file, N = 135, SS = 3) {
     tg.drawImage(bmp, (w - m) >> 1, (h - m) >> 1, m, m, 0, 0, 256, 256);
     const tex = tg.getImageData(0, 0, 256, 256).data;
     const n = N * SS, px = new Uint8ClampedArray(n * n * 4);
+    // a fixed checkerboard rotation angle and a fixed light direction (normalised below), both chosen by eye
     const ang = 0.45, ca = Math.cos(ang), sa = Math.sin(ang);
     const cx = n * 0.5, cy = n * 0.52, r = n * 0.40;
     let Lx = -0.45, Ly = -0.55, Lz = 0.70; const ln = Math.hypot(Lx, Ly, Lz); Lx /= ln; Ly /= ln; Lz /= ln;
+    // the actual per-pixel render: for every pixel, decide whether it's inside the sphere's circle (and if
+    // so, sample the texture there with simple Lambert shading + a small specular highlight) or outside it
+    // (in which case paint the rotated checkerboard background instead)
     for (let y = 0; y < n; y++) {
       for (let x = 0; x < n; x++) {
         const o = (y * n + x) * 4;
         const dx = (x - cx) / r, dy = (y - cy) / r, d2 = dx * dx + dy * dy;
         let R, G, B;
         if (d2 < 1) {
+          // inside the sphere: dx,dy are the sphere-surface normal's x/y; dz is solved from the unit-sphere equation
           const dz = Math.sqrt(Math.max(0, 1 - d2));
           const u = Math.min(255, Math.max(0, Math.trunc((dx * 0.5 + 0.5) * 255)));
           const v = Math.min(255, Math.max(0, Math.trunc((dy * 0.5 + 0.5) * 255)));
           const t = (v * 256 + u) * 4;
-          const lam = Math.min(1, Math.max(0, dx * Lx + dy * Ly + dz * Lz));
-          const spec = Math.pow(Math.min(1, Math.max(0, 2 * lam * dz - Lz)), 24) * 0.25;
+          const lam = Math.min(1, Math.max(0, dx * Lx + dy * Ly + dz * Lz));           // Lambert (diffuse) term
+          const spec = Math.pow(Math.min(1, Math.max(0, 2 * lam * dz - Lz)), 24) * 0.25; // a small specular highlight
           const k = 0.35 + 0.75 * lam;
           R = (tex[t] / 255) * k + spec; G = (tex[t + 1] / 255) * k + spec; B = (tex[t + 2] / 255) * k + spec;
         } else {
+          // outside the sphere: a rotated checkerboard, darker toward the "floor" for a bit of depth
           const qx = x / n - 0.5, qy = y / n - 0.5;
           const rx = qx * ca - qy * sa, ry = qx * sa + qy * ca;
           const depth = 1.0 + 0.5 * (ry + 0.5);
@@ -481,6 +606,8 @@ async function renderPreview(file, N = 135, SS = 3) {
         px[o + 2] = Math.min(1, Math.max(0, B)) * 255; px[o + 3] = 255;
       }
     }
+    // downscale the SS-times-oversized render to the final N x N size (cheap anti-aliasing), then encode
+    // as a base64 PNG, line-wrapped every 76 characters the way PYTHA's own files format embedded images
     const big = document.createElement('canvas'); big.width = big.height = n;
     big.getContext('2d').putImageData(new ImageData(px, n, n), 0, 0);
     const sm = document.createElement('canvas'); sm.width = sm.height = N;
@@ -495,32 +622,51 @@ async function renderPreview(file, N = 135, SS = 3) {
 
 /* ================================================================== UI state */
 const $ = id => document.getElementById(id);
+// THE single source of truth for everything about the current run. Every UI-rendering function below
+// reads from this object; every user action updates it and then calls whichever render function needs to
+// catch up (there's no framework here - it's plain "mutate state, then manually re-render the bits that
+// changed").
 const S = {
   mode: 'sync', root: null,          // root = {name, handle|null, entries:[{path, get()}]}
   pymatPath: null, lib: null, items: [], skipped: 0, texDir: '',
   previews: new Map(), gen: 0, busy: false, strip: null,
 };
+// Whether this browser supports the File System Access API's directory picker (Chrome/Edge do; Firefox
+// and Safari currently don't, so they fall through to the plain <input webkitdirectory> picker instead,
+// which can read a folder's contents but not write a result back into it).
 const HAS_PICKER = typeof window.showDirectoryPicker === 'function';
 
+// HTML-escape a value before interpolating it into innerHTML anywhere in this file.
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Fills one of the message-banner containers (#s1msgs, #s2msgs, #s3msgs) from a list of {t: css-class, html: content} entries.
 function setMsgs(id, list) {
   $(id).innerHTML = list.map(m => `<div class="msg ${m.t}">${m.html}</div>`).join('');
 }
 
 /* ---------- loading a folder */
 const ROTATED_DIR = /\(rotated( \d+)?\)$/i;   // output of the rotate option; never scanned as source textures
+// Recursively walks a FileSystemDirectoryHandle (from showDirectoryPicker), collecting every file as
+// {path, get()} - `get()` is a function rather than the file itself so large folders don't have to hold
+// every file's contents in memory at once; files are only actually opened when needed (scanning, drawing
+// a thumbnail, or writing the final .pymat). Skips dotfolders and any previous "(rotated)" output folder.
 async function walk(dir, prefix, out) {
   for await (const [name, h] of dir.entries()) {
     if (h.kind === 'directory') { if (!name.startsWith('.') && !ROTATED_DIR.test(name)) await walk(h, prefix + name + '/', out); }
     else out.push({ path: prefix + name, get: () => h.getFile() });
   }
 }
+// Loads a folder picked via showDirectoryPicker (the read/write-capable path).
 async function loadHandle(handle) {
   showStatus('Reading folder…');
   const entries = [];
   await walk(handle, '', entries);
   setRoot({ name: handle.name, handle, entries });
 }
+// Loads a folder picked via the plain <input webkitdirectory> fallback. FileList entries carry their
+// path as `webkitRelativePath` (e.g. "MyFolder/sub/image.jpg"); this strips the top-level folder name off
+// to get paths relative to the folder itself, matching what walk() produces for the other path. No real
+// directory handle exists here, so `handle: null` - that's what makes S.root.handle falsy elsewhere,
+// switching the tool into "download the result" mode instead of "save directly into the folder".
 function loadFileList(files) {
   const entries = []; let name = 'textures';
   for (const f of files) {
@@ -532,6 +678,8 @@ function loadFileList(files) {
   }
   setRoot({ name, handle: null, entries });
 }
+// Common final step for both loading paths above: stores the new root in S, clears anything left over
+// from a previous folder, shows the "N images found" note, and kicks off refresh() to build the plan.
 function setRoot(root) {
   S.root = root; S.previews.clear(); S.pymatPath = null; $('s3msgs').innerHTML = '';
   const imgs = root.entries.filter(e => IMG.has(extOf(e.path))).length;
@@ -542,6 +690,10 @@ function setRoot(root) {
 }
 
 /* ---------- build the plan from the current folder + mode */
+// THE PLANNER. Re-runs whenever the folder, mode, or any option that changes WHICH materials are offered
+// changes (as opposed to options that only affect how a material is written, like "Material look").
+// `gen` (a bumped counter) guards against a stale, still-running refresh() overwriting a NEWER one's
+// results if the user changes something again before the first run (which does async file reads) finishes.
 async function refresh() {
   if (!S.root) return;
   const gen = ++S.gen, standalone = S.mode === 'folder';
@@ -558,6 +710,7 @@ async function refresh() {
 
   let texDir = '', used = new Set();
   if (!standalone) {
+    // "sync" mode needs an existing .pymat to add to; if none was found in the folder, stop here with a warning.
     if (!pymats.length) {
       s1.push({ t: 'warn', html: `No <code>.pymat</code> file was found in this folder. Pick the folder that contains your library, or switch to <b>New library from a folder</b>.` });
       return finish();
@@ -566,13 +719,17 @@ async function refresh() {
     $('pymatSel').innerHTML = pymats.map(p => `<option value="${esc(p)}"${p === S.pymatPath ? ' selected' : ''}>${esc(p)}</option>`).join('');
     texDir = dirName(S.pymatPath);
     try { S.lib = await readLibrary(S.pymatPath); } catch (e) { s1.push({ t: 'err', html: esc(e.message) }); return finish(); }
-    if (gen !== S.gen) return;
+    if (gen !== S.gen) return;        // a newer refresh() started while we were awaiting readLibrary - abandon this one
   }
   S.texDir = texDir;
   const prefix = texDir ? texDir + '/' : '';
   const scoped = S.root.entries.filter(e => e.path.startsWith(prefix)).map(e => e.path.slice(prefix.length));
 
   if (S.lib) {
+    // Sanity-check the EXISTING library against what's actually on disk: flag any <source url> that's an
+    // absolute file:/// path (won't work if the folder is ever moved or shared) or that points at a file
+    // which no longer exists next to the .pymat. Also builds `used`, the lowercase set of every relative
+    // path the library already references, so planMaterials() can skip texture sets already covered.
     const have = new Set(scoped.map(p => p.toLowerCase()));
     const warn = [];
     for (const u of S.lib.urls) {
@@ -599,12 +756,17 @@ async function refresh() {
   }
 }
 
+// Compiles the "Remove from names" text box into a RegExp (only used in folder/standalone mode), warning
+// (rather than throwing) if the user has typed something that isn't valid regex syntax yet.
 function compileStrip(msgs) {
   const v = $('strip').value;
   if (!v || S.mode !== 'folder') return null;
   try { return new RegExp(v, 'gi'); } catch (e) { msgs.push({ t: 'warn', html: `That "remove from names" pattern isn't valid yet (${esc(e.message)}). It is being ignored.` }); return null; }
 }
 
+// Resolves a possibly-relative path with ".." segments against nothing (i.e. just normalises it), the way
+// a URL's relative path would resolve - used on the <source url> links read out of an existing library so
+// they can be compared against the actual on-disk paths in `have` above.
 function resolveRel(p) {
   const out = [];
   for (const seg of p.replace(/\\/g, '/').split('/')) {
@@ -614,6 +776,11 @@ function resolveRel(p) {
   return out.join('/');
 }
 
+// Reads and lightly parses an existing .pymat file (plain XML, but handled with regexes rather than a
+// real XML parser - see the next function's comment for why). Detects a UTF-8 BOM and CRLF line endings
+// so the file can be written back out byte-for-byte compatible with how it started; pulls out every
+// existing id (to compute the next free one), every material name (for duplicate-name checking) and
+// every asset's <source url> (to check against what's really on disk, and to know what NOT to re-add).
 async function readLibrary(path) {
   const e = S.root.entries.find(x => x.path === path);
   const buf = new Uint8Array(await (await e.get()).arrayBuffer());
@@ -632,7 +799,11 @@ async function readLibrary(path) {
 }
 
 /* ---------- review table */
+// The texture-set key used to look up/store a material's cached thumbnail - the colour map's path,
+// including the library's texture-folder prefix if any, so it stays unique across the whole run.
 function colorKey(it) { return (S.texDir ? S.texDir + '/' : '') + it.maps.color; }
+// Every name that would collide, either with another SELECTED item in this run or with a name already in
+// the existing library - used to flag duplicate names in the table (see renderTable()/renameAll() below).
 function dupSet() {
   const seen = new Map(), dups = new Set();
   const names = S.lib ? S.lib.names : new Set();
@@ -643,6 +814,9 @@ function dupSet() {
   }
   return dups;
 }
+// Rebuilds the whole review table's HTML from S.items (called after refresh(), and after anything that
+// adds/removes/reorders rows). Per-field edits after that are handled more cheaply by the delegated event
+// listeners further down (which just mutate S.items / toggle a class, without rebuilding the whole table).
 function renderTable() {
   const wrap = $('tablewrap');
   wrap.hidden = !S.items.length;
@@ -666,11 +840,16 @@ function renderTable() {
   for (const img of $('rows').querySelectorAll('img[data-k]')) paintThumb(img);
   updateBar();
 }
+// Sets (or clears) one <img>'s src from the cached preview for its texture-set key, if a preview has been
+// rendered yet - thumbnails are drawn progressively in the background (see queuePreviews below), so a
+// freshly-rendered row often shows a blank thumbnail box for a moment before this gets called again.
 function paintThumb(img) {
   const p = S.previews.get(img.dataset.k);
   if (p) img.src = 'data:image/png;base64,' + p.replace(/\n/g, '');
   else img.removeAttribute('src');
 }
+// Refreshes the bottom status bar's text and button states (selected count, destination filename,
+// disabled/hidden state of Create/Cancel) - called after almost anything changes.
 function updateBar() {
   const n = S.items.filter(i => i.include).length;
   const standalone = S.mode === 'folder';
@@ -684,12 +863,17 @@ function updateBar() {
   $('cancel').disabled = !!S.abort;
   $('all').checked = S.items.length > 0 && n === S.items.length;
 }
+// Works out what the output file will be named/where it will go, given the current mode and options -
+// shown in the status bar before Create is even clicked, and used again for real inside create().
 function destName() {
   if (!S.root) return '';
   if (S.mode === 'sync') return S.pymatPath ? uniqueFile(S.texDir, stemOf(baseName(S.pymatPath)) + '_NEW', '.pymat') : '';
   if ($('rotate').checked && S.root.handle) return `${S.root.name} (rotated)/${S.root.name}.pymat`;
   return uniqueFile('', S.root.name, '.pymat');
 }
+// Picks a filename that doesn't already exist in the folder (appending " 2", " 3", ... as needed) - except
+// in "sync" mode, where the "_NEW" suffix file IS this tool's own previous output and is meant to be
+// overwritten on a re-run rather than endlessly multiplying.
 function uniqueFile(dir, base, ext) {
   const have = new Set(S.root.entries.map(e => e.path.toLowerCase()));
   const pre = dir ? dir + '/' : '';
@@ -700,6 +884,7 @@ function uniqueFile(dir, base, ext) {
 }
 
 /* ---------- thumbnails */
+// Renders (or returns the already-cached) preview for one item's colour map.
 async function ensurePreview(it) {
   const k = colorKey(it);
   if (S.previews.has(k)) return S.previews.get(k);
@@ -709,6 +894,10 @@ async function ensurePreview(it) {
   S.previews.set(k, b64);
   return b64;
 }
+// Renders every item's thumbnail one at a time in the background (yielding to the browser between each
+// one via setTimeout(0), so the page stays responsive on a folder with hundreds of textures), painting
+// each one into the table as soon as it's ready. Bails out immediately if a newer refresh() has started
+// (gen mismatch) or if thumbnails have been turned off.
 async function queuePreviews(gen) {
   if (!$('thumbs').checked) return;
   for (const it of S.items) {
@@ -722,7 +911,11 @@ async function queuePreviews(gen) {
 }
 
 /* ---------- create + save */
+// A dedicated error subclass so the big try/catch in create() can tell "the user clicked Cancel" apart
+// from "something actually went wrong" (see checkAbort()/requestAbort() below).
 class AbortRun extends Error {}
+// Called at each safe checkpoint inside create()'s long-running loop; throws AbortRun if the user has
+// asked to cancel, which unwinds back up to create()'s catch block.
 function checkAbort() { if (S.abort) throw new AbortRun('cancelled'); }
 function requestAbort() {
   if (!S.busy || S.abort) return;
@@ -731,6 +924,11 @@ function requestAbort() {
 }
 $('cancel').addEventListener('click', requestAbort);
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.busy) requestAbort(); });
+// THE MAIN ACTION: builds the final .pymat (or, in folder mode with rotation on, a folder of rotated
+// copies alongside it) from every currently-included item, and saves (or downloads) the result. Broken
+// into clear phases - rotate images (optional) -> render/collect thumbnails -> assemble the XML -> write
+// the file - each phase updates the status bar with a progress count and calls checkAbort() between
+// items so a cancel request takes effect promptly rather than only between whole phases.
 async function create() {
   const sel = S.items.filter(i => i.include);
   if (!sel.length || S.busy) return;
@@ -741,6 +939,11 @@ async function create() {
     const rotate = standalone && $('rotate').checked && !!S.root.handle;
     let nRot = 0; const relMap = new Map(), rotPrev = new Map();
     if (rotate) {
+      // Rotation phase: every image actually used by a selected item (colour map, plus its chosen bump
+      // map if any) gets rotated 90° clockwise and saved into a fresh "(rotated)" sibling folder;
+      // `relMap` remembers old-path -> new-path so the XML written further down links to the ROTATED
+      // copies, and `rotPrev` caches a thumbnail rendered from the rotated bytes (so the preview matches
+      // what's actually being linked, not the original orientation).
       if (!(await canWrite())) throw new Error('Permission to save into the folder was not given.');
       outDir = await freeRotatedName();
       const colours = new Set(sel.map(it => it.maps.color));
@@ -760,6 +963,10 @@ async function create() {
         await new Promise(r => setTimeout(r, 0));
       }
     }
+    // Thumbnail phase: get every selected item's preview (from the rotated-image cache if rotation ran,
+    // otherwise the normal ensurePreview cache, or skip entirely if thumbnails are off) - yielding to the
+    // browser every few items rather than every single one, since this phase is usually already fast
+    // thanks to the earlier background queuePreviews() having pre-rendered most of them.
     const previews = [];
     for (let i = 0; i < sel.length; i++) {
       checkAbort();
@@ -768,6 +975,10 @@ async function create() {
       if (i % 4 === 3) await new Promise(r => setTimeout(r, 0));
     }
     $('status').textContent = 'Writing file…';
+    // XML-assembly phase: walk every selected item, pick a non-colliding name (against both the existing
+    // library's names and names already used earlier in THIS run), allocate fresh asset/material ids
+    // starting from the right place (1001 for a brand-new standalone library, or the existing library's
+    // own next-free id), and build each material's XML block plus its asset entries.
     const names = new Set(standalone ? [] : S.lib.names);
     let nxt = standalone ? 1001 : S.lib.next;
     const prefix = S.texDir ? S.texDir + '/' : '';
@@ -788,6 +999,11 @@ async function create() {
       mats.push(materialXml(name, nxt++, caid, baid, previews[i], size));
     });
     const matText = mats.map(m => m.join('\n')).join('\n');
+    // Final assembly: either start from the empty skeleton() and splice the new materials/assets straight
+    // in (standalone mode), or splice them into the EXISTING library's own XML text just before its
+    // closing </materials>/</assets> tags (sync mode) - preserving that file's own line-ending style
+    // (crlf) and byte-order-mark (bom) so round-tripping through this tool changes as little as possible
+    // of the original file byte-for-byte.
     let out, fileName, dir = S.texDir;
     if (standalone) {
       out = skeleton()
@@ -818,6 +1034,8 @@ async function create() {
     $('s3msgs').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } catch (e) {
     if (e instanceof AbortRun) {
+      // On cancel, best-effort clean up any rotated-image folder that was already (partly) written,
+      // rather than leaving orphaned rotated copies with no .pymat to go with them.
       let note = 'Nothing was saved.';
       if (madeDir) {
         try { await S.root.handle.removeEntry(outDir, { recursive: true }); }
@@ -832,6 +1050,10 @@ async function create() {
 }
 
 /* rotate 90 degrees clockwise; createImageBitmap applies any EXIF orientation first */
+// Rotates one image file 90° clockwise via a <canvas> (draw it into a canvas whose own coordinate system
+// has been rotated, then read the canvas back out as a new image blob). JPEGs stay JPEGs (quality 0.95);
+// every other supported format (png/tif/bmp) is re-encoded as PNG, since <canvas> can only export to a
+// small set of formats.
 async function rotateCW(file, ext) {
   const bmp = await createImageBitmap(file);
   const w = bmp.height, h = bmp.width;
@@ -845,18 +1067,26 @@ async function rotateCW(file, ext) {
   if (!blob) throw new Error('An image was too large for this browser to rotate.');
   return { blob, ext: jpeg ? ext : '.png' };      // jpg stays jpg; png, tif and bmp are saved as png
 }
+// Checks (and, if needed, prompts for) read-write permission on the folder handle - the File System
+// Access API requires explicit permission before writing, separate from the read permission implicitly
+// granted when the folder was first picked.
 async function canWrite() {
   const h = S.root.handle;
   if (!h) return false;
   if (!h.queryPermission) return true;
   return (await h.queryPermission({ mode: 'readwrite' })) === 'granted' || (await h.requestPermission({ mode: 'readwrite' })) === 'granted';
 }
+// Writes `data` to `name` inside `dirPath` (relative to the root folder handle), creating any missing
+// subfolders along the way.
 async function writeAt(dirPath, name, data) {
   let d = S.root.handle;
   for (const seg of dirPath.split('/').filter(Boolean)) d = await d.getDirectoryHandle(seg, { create: true });
   const fh = await d.getFileHandle(name, { create: true });
   const w = await fh.createWritable(); await w.write(data); await w.close();
 }
+// Finds an unused "<folder name> (rotated)", "(rotated 2)", ... subfolder name to write rotated copies
+// into, by trying to open each candidate as an existing directory and taking the first one that fails
+// (i.e. doesn't exist yet).
 async function freeRotatedName() {
   for (let i = 1; i < 100; i++) {
     const n = `${S.root.name} (rotated${i > 1 ? ' ' + i : ''})`;
@@ -865,6 +1095,11 @@ async function freeRotatedName() {
   throw new Error('Too many rotated folders already exist.');
 }
 
+// Saves the final bytes either directly into the folder (if a real directory handle exists and
+// read-write permission is granted) or, failing that, as a browser download via a temporary <a download>
+// link - this is the fallback path used whenever HAS_PICKER was false to begin with, or permission was
+// denied. Returns true if it actually wrote into the folder, false if it fell back to a download (used to
+// pick the right wording in the final success message).
 async function saveFile(dir, fileName, bytes) {
   const h = S.root.handle;
   if (h) {
@@ -890,6 +1125,8 @@ async function saveFile(dir, fileName, bytes) {
 }
 
 /* ================================================================== wiring */
+// Everything from here down just connects the static HTML controls to the functions defined above - no
+// new logic, just event listeners.
 function showStatus(t) { $('status').textContent = t; $('bar').hidden = false; }
 
 $('pick').addEventListener('click', async () => {
@@ -901,6 +1138,9 @@ $('pick').addEventListener('click', async () => {
 $('fallbackInput').addEventListener('change', e => { if (e.target.files.length) loadFileList(e.target.files); e.target.value = ''; });
 if (!HAS_PICKER) $('dropHint').textContent = 'Your browser can read folders but not save into them; the finished file will download. Chrome or Edge can save straight into the folder.';
 
+// Drag-and-drop a folder straight onto the drop zone - only works where the browser exposes
+// getAsFileSystemHandle (same browsers that support showDirectoryPicker); otherwise shows a hint to use
+// the button instead.
 const drop = $('drop');
 drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
 drop.addEventListener('dragleave', () => drop.classList.remove('over'));
@@ -919,12 +1159,17 @@ $('pymatSel').addEventListener('change', e => { S.pymatPath = e.target.value; re
 $('bumpPref').addEventListener('change', refresh);
 $('rotate').addEventListener('change', updateBar);
 $('thumbs').addEventListener('change', () => { if ($('thumbs').checked) queuePreviews(S.gen); });
+// Debounced: re-deriving every item's name on every single keystroke in the "Remove from names" box would
+// be wasteful, so this waits 250ms after the last keystroke before actually recomputing.
 let stripTimer;
 $('strip').addEventListener('input', () => {
   clearTimeout(stripTimer);
   stripTimer = setTimeout(renameAll, 250);
 });
 $('fullNames').addEventListener('change', renameAll);
+// Recomputes autoName() for every item under the current naming options, but only actually CHANGES an
+// item's displayed name if the user hasn't manually typed over it (it.edited) - so adjusting "Remove from
+// names" or "Use full file names" doesn't clobber a name you already customised by hand.
 function renameAll() {
   const msgs = [], strip = compileStrip(msgs);
   setMsgs('s2msgs', msgs);
@@ -935,6 +1180,8 @@ function renameAll() {
   }
   renderTable();
 }
+// Delegated listeners on the table body (rather than one listener per row/cell) so they keep working as
+// renderTable() rebuilds the rows' HTML. `data-i`/`data-f` on each control say which item and which field.
 $('rows').addEventListener('input', e => {
   const t = e.target, it = S.items[+t.dataset.i];
   if (!it) return;
@@ -950,6 +1197,9 @@ $('all').addEventListener('change', e => { S.items.forEach(i => i.include = e.ta
 $('create').addEventListener('click', create);
 
 /* ---------- remembered settings (this browser only; page works the same if storage is blocked) */
+// PREFS lists every control whose value should persist across visits, together with its default; the
+// functions below just read/write each one generically by its element id and input type, so adding a new
+// rememberable setting later only means adding one line here.
 const PREF_KEY = 'pymatFromTextures.settings';
 const PREFS = { bumpPref: 'auto', strip: '', fullNames: false, rotate: false, tileSize: true, thumbs: true, look: 'none', lookMatte: 0.8, lookSpec: 0, lookHi: 0.4, bumpAngle: 80 };
 function savePrefs() {
@@ -957,6 +1207,8 @@ function savePrefs() {
   for (const k in PREFS) o[k] = $(k).type === 'checkbox' ? $(k).checked : $(k).value;
   try { localStorage.setItem(PREF_KEY, JSON.stringify(o)); } catch (e) {}
 }
+// Applies a saved-preferences object back onto the controls, ignoring any key that's missing or (for a
+// <select>) no longer a valid option - so an older saved value never leaves a dropdown in a broken state.
 function applyPrefs(o) {
   for (const k in PREFS) {
     if (!(k in o)) continue;
@@ -964,6 +1216,8 @@ function applyPrefs(o) {
     else if ($(k).tagName !== 'SELECT' || [...$(k).options].some(x => x.value === o[k])) $(k).value = String(o[k]);
   }
 }
+// Load whatever was saved last time (silently doing nothing if localStorage is blocked/empty), then sync
+// the look-related readouts and wire up auto-saving for every PREFS control going forward.
 try { applyPrefs(JSON.parse(localStorage.getItem(PREF_KEY) || '{}')); } catch (e) {}
 syncLook(false);
 for (const k in PREFS) $(k).addEventListener($(k).type === 'text' || $(k).type === 'range' ? 'input' : 'change', savePrefs);
@@ -979,5 +1233,3 @@ $('resetPrefs').addEventListener('click', () => {
   if ($('thumbs').checked) queuePreviews(S.gen);
 });
 </script>
-</body>
-</html>

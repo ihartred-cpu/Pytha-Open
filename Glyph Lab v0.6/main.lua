@@ -3,27 +3,44 @@
 -- every call runs inside pcall and the exact error text is kept.
 -- Layout of the result: one top-level group "Glyph Lab" with every variant side by side along +x (front view, x-z plane).
 -- Report: shown in an alert and, if the scratch folder is writable, saved as glyph_lab_report.txt (path in the alert).
+--
+-- WHY THIS PLUGIN EXISTS: the PYTHA Lua wiki documents a lot of geometry calls (text, engraving, rings, booleans,
+-- plot-sheet dimensioning...), but doesn't always say which PYTHA version actually ships them, or whether optional
+-- arguments really do anything. Rather than trust the wiki, this plugin just TRIES every call on your real install,
+-- catches any error with pcall so one missing feature can't crash the rest of the run, and prints a plain pass/fail
+-- report. Read it as a compatibility probe, not a finished tool for cabinet work.
 
 local GROUP_NAME = "Glyph Lab"
 local STEP_MM = 160		--spacing between variants
 
+-- Default dialog settings; sheet_tests/keep_sheet control the optional plot-sheet probes further down.
 local DEFAULTS = {size_mm = 100, thick_mm = 6, pen_body = 0, pen_feature = 0, sheet_tests = false, keep_sheet = true}
 
+--millimetres (this plugin's internal unit) -> the document's current length unit
 local function to_doc(value_mm)
 	if pytha.get_length_unit() == "in" then return value_mm / 25.4 end
 	return value_mm
 end
 
+--alias kept so the geometry-building code below reads "mm_to_doc" at the point of use
 local function mm_to_doc(value_mm) return to_doc(value_mm) end
 
+-- MODULE-LEVEL state, reset at the top of each run (see glyph_lab() below):
+--   results         - the running report: one {name, succeeded, detail} row per probe
+--   top_level_items - every element handle that should end up in the final "Glyph Lab" group
 local results = {}		--{name, succeeded, detail}
 local top_level_items = {}		--every top-level thing to put in the final group
 
+-- Append one row to the report.
 local function record(name, succeeded, detail)
 	table.insert(results, {name, succeeded, tostring(detail or "")})
 end
 
 --run fn; keep success/error text; returns ok, value
+-- This is the probe harness: call `function_to_run` inside pcall so a missing
+-- API or a bad argument never aborts the whole plugin, log a pass/fail row
+-- for `name`, and hand back pcall's own (ok, value_or_error) so the caller
+-- can still use the created element when the call succeeded.
 local function try(name, function_to_run)
 	local call_ok, value_or_error = pcall(function_to_run)
 	if call_ok then
@@ -34,11 +51,17 @@ local function try(name, function_to_run)
 	return call_ok, value_or_error
 end
 
+-- Some PYTHA calls return a single element handle, others return a table of
+-- handles (e.g. a group's members). `first` normalises that so the rest of
+-- this file can treat both shapes the same way.
 local function first(handle)
 	if type(handle) == "table" then return handle[1] end
 	return handle
 end
 
+-- Format an element's bounding-box size as "W x H x D mm" for the report, so
+-- you can sanity-check a glyph actually has the size you asked for (e.g. an
+-- emoji glyph with no matching font glyph often comes back tiny or empty).
 local function size_of(handle)
 	local call_ok, box = pcall(function() return pytha.get_element_bounding_box(first(handle)) end)
 	if call_ok and type(box) == "table" and box[1] and box[2] then
@@ -49,6 +72,7 @@ local function size_of(handle)
 	return "no bounding box"
 end
 
+--apply a pen (colour) to an element if one was requested (pen 0 means "leave PYTHA's current pen alone")
 local function paint(handle, pen)
 	if handle ~= nil and pen and pen > 0 then
 		pcall(function() pytha.set_element_pen(first(handle), pen) end)
@@ -56,6 +80,13 @@ local function paint(handle, pen)
 end
 
 -- flat geometry is drawn in local (u,v) = the front view (x right, z up), w toward -y, so "extrude" goes into the wall
+-- This temporarily re-orients PYTHA's working coordinate system so every 2D
+-- shape built inside `build_function` is drawn flat in a front-view plane
+-- offset along +x by `offset_x_mm` (this is what lines up all the test
+-- variants side by side). push_local_coordinates/pop_local_coordinates must
+-- always be paired, so the pop happens even if build_function raises an
+-- error - the error is then re-raised (error(first_result, 0)) so the
+-- calling try() can still record it as a failure.
 local function in_front_plane(offset_x_mm, build_function)
 	local token = pytha.push_local_coordinates({mm_to_doc(offset_x_mm), 0, 0}, {u_axis = {1, 0, 0}, v_axis = {0, 0, 1}, w_axis = {0, -1, 0}})
 	local call_ok, first_result, second_result = pcall(build_function)
@@ -65,6 +96,11 @@ local function in_front_plane(offset_x_mm, build_function)
 end
 
 -- loop helpers (all mm, converted here). A full circle = two 180 deg arcs (the wiki's own pattern).
+-- Builds the (points, arc-info) pair PYTHA's polygon/profile calls expect for
+-- one circular loop: two points exactly opposite each other on the circle,
+-- joined by two 180-degree arcs. `reversed` flips the winding direction,
+-- which matters when a loop is meant to be a HOLE rather than an outer
+-- boundary (see the T7c/T12b "holes wound opposite" probes below).
 local function circle_loop(centre_x, centre_y, radius, reversed)
 	if reversed then
 		return {{ {mm_to_doc(centre_x + radius), mm_to_doc(centre_y)}, {mm_to_doc(centre_x - radius), mm_to_doc(centre_y)} }, { {angle = -180, segments = 24}, {angle = -180, segments = 24} }}
@@ -73,6 +109,9 @@ local function circle_loop(centre_x, centre_y, radius, reversed)
 end
 
 -- smiley loops for size s (mm): face circle, two eyes, crescent mouth
+-- Returns four loops (outer face, left eye, right eye, mouth) sized relative
+-- to `size`. The mouth is two points joined by a deep arc out and a
+-- shallower arc back, which draws a crescent rather than a full lens shape.
 local function smiley_loops(size, reversed)
 	local radius = size / 2
 	local eye = radius * 0.12
@@ -90,6 +129,8 @@ local function smiley_loops(size, reversed)
 end
 
 -- warning sign loops for size s (mm): triangle, bar, dot
+-- Returns the classic "triangle with an exclamation mark" as three loops:
+-- the outer triangle, the "!" bar, and the "!" dot underneath it.
 local function warning_loops(size, reversed)
 	local width, height = size, size * 0.866
 	local triangle = {{ {mm_to_doc(-width / 2), 0}, {mm_to_doc(width / 2), 0}, {mm_to_doc(0), mm_to_doc(height)} }}
@@ -101,6 +142,10 @@ local function warning_loops(size, reversed)
 	return triangle, bar, dot
 end
 
+-- Turns a flat face into a solid of thickness `thick_mm` via create_profile.
+-- create_profile keeps the original flat face around as well as the new
+-- solid, so this deletes that leftover face right after, keeping only the
+-- extruded result.
 local function extrude_face(face, thick_mm)
 	local profile_result = pytha.create_profile(first(face), mm_to_doc(thick_mm))
 	pcall(function() pytha.delete_element(first(face)) end)	--create_profile keeps its base face
@@ -110,6 +155,11 @@ end
 ----------------------------------------------------------------------------------------------------------------
 -- tests
 ----------------------------------------------------------------------------------------------------------------
+-- run(settings): the actual probe sequence. Each block below follows the
+-- same shape - try() one PYTHA call, and if it succeeded, paint it, add it
+-- to top_level_items (so it ends up in the final "Glyph Lab" group) and
+-- record its measured size. next_offset_x() hands out increasing +x offsets
+-- so every variant lands in its own slot, left to right.
 local function run(settings)
 	local offset_x = 0
 	local function next_offset_x() local current_x = offset_x; offset_x = offset_x + STEP_MM; return current_x end
@@ -176,6 +226,10 @@ local function run(settings)
 	if call_ok then paint(handle, settings.pen_body); table.insert(top_level_items, handle); record("   size", true, size_of(handle)) end
 
 	-- E2. diagnose the missing holes: the flat face alone (look at it before any extrusion), then holes wound the other way
+	-- (polygon_ex treats a loop as a HOLE only if it's wound opposite to the
+	-- outer loop; T7b checks whether the holes show up at all on the flat
+	-- face, T7c retries with the eyes/mouth loops reversed to see if that's
+	-- what was missing.)
 	call_ok, handle = try("T7b smiley FACE ONLY (polygon_ex, no extrusion) - holes visible?", function()
 		return in_front_plane(next_offset_x(), function()
 			local outer, left_eye, right_eye, mouth = smiley_loops(settings.size_mm)
@@ -258,6 +312,7 @@ local function run(settings)
 	end)
 	if call_ok then paint(handle, settings.pen_body); table.insert(top_level_items, handle); record("   size", true, size_of(handle)) end
 
+	-- same "holes wound opposite" and "boolean difference" variants as the smiley, applied to the warning sign
 	call_ok, handle = try("T12b warning polygon_ex, holes wound opposite, extruded", function()
 		return in_front_plane(next_offset_x(), function()
 			local triangle = warning_loops(settings.size_mm)
@@ -305,6 +360,8 @@ end
 ----------------------------------------------------------------------------------------------------------------
 -- dialog + report
 ----------------------------------------------------------------------------------------------------------------
+-- The options dialog: glyph size/thickness, two optional pens, and the
+-- "also probe plot-sheet calls" checkboxes (see sheet_tests below).
 local function dialog_fn(dialog, settings)
 	dialog:set_window_title(pyloc "Glyph Lab 0.6")
 	dialog:create_standalone_label({1, 2}, pyloc "Builds a smiley and a warning sign several ways and reports what this PYTHA accepts.")
@@ -343,6 +400,12 @@ local function dialog_fn(dialog, settings)
 	dialog:equalize_column_widths({1, 2})
 end
 
+-- OPTIONAL probe set (only runs if "Also test plot-sheet calls" is ticked):
+-- creates a plot sheet and tries to place front/top/side views of the
+-- "Glyph Lab" group on it, plus title-block text and a pydim dimension-text
+-- probe. This is the riskiest part of the plugin (plot-sheet units are
+-- undocumented) so it's opt-in and, by default, cleans up after itself
+-- unless "Keep that sheet" is ticked.
 local function sheet_tests(settings, group)
 	local create_ok, sheet = try("S1 pyplot.create_sheet('Glyph Lab sheet') - wiki says V26", function()
 		return pyplot.create_sheet("Glyph Lab sheet")
@@ -416,6 +479,12 @@ local function sheet_tests(settings, group)
 	end
 end
 
+-- The plugin's one entry point. Flow: load/show settings -> delete any
+-- "Glyph Lab" group left over from a previous run (so re-running never
+-- stacks test geometry on top of itself) -> run() every geometry probe ->
+-- gather everything that got created into a fresh "Glyph Lab" group ->
+-- optionally also run the plot-sheet probes -> build and show the pass/fail
+-- report, also saving it to the plugin scratch folder.
 function glyph_lab()
 	local settings = {}
 	for key, value in pairs(DEFAULTS) do settings[key] = value end
@@ -440,6 +509,9 @@ function glyph_lab()
 	for _, old_group in ipairs(old_groups) do
 		pcall(function() pytha.delete_element(old_group) end)
 	end
+	-- run every geometry probe; if the whole batch raises (shouldn't, since
+	-- each individual probe is already wrapped in try()/pcall), record that
+	-- too rather than letting glyph_lab() itself crash.
 	local run_ok, run_error = pcall(run, settings)
 	if not run_ok then record("run aborted", false, run_error) end
 	local group
@@ -454,6 +526,8 @@ function glyph_lab()
 		if not sheet_ok then record("sheet tests aborted", false, sheet_error) end
 	end
 
+	-- build the final plain-text report: one line per probe, pass/fail tally,
+	-- and a pointer to where the test geometry ended up.
 	local lines, passed, failed = {"Glyph Lab 0.6 report", ""}, 0, 0
 	for _, result_row in ipairs(results) do
 		if result_row[2] then passed = passed + 1 else failed = failed + 1 end

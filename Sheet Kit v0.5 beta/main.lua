@@ -8,13 +8,24 @@
 --   * pydim (model dimensions/annotations) does not exist on this build; nothing here uses it.
 -- NOT verified: top/side view orientation on a model with real depth (check the first sheet!), sheet sizes other than
 -- Letter landscape (the layout constants below assume 11 x 8.5 in), non-inch documents.
+--
+-- WHAT THIS PLUGIN DOES, IN ONE SENTENCE: pick (or don't pick) some groups, and it builds a brand-new plot sheet
+-- with a standard third-angle layout (front view, top view above it, side view beside it), a title block, and
+-- automatically picks a sensible architectural scale so the views fit the page - or lets you force a specific one.
 
 --sheet presets, inches. drawing_area = drawing area above the title strip (left/top = its corner); text_scale = text size factor (Letter = 1)
 local PAPERS = {
 	letter = {width = 11, height = 8.5, drawing_area = {left = 0.7, top = 1.7, width = 9.6, height = 6.1}, view_gap = 0.7, text_scale = 1},
 	archd = {width = 36, height = 24, drawing_area = {left = 1.0, top = 3.0, width = 34.0, height = 19.8}, view_gap = 1.5, text_scale = 2.4},
 }
+-- These three are overwritten by elevations_sheet() once it knows which
+-- paper preset the user asked for; they exist as module-level variables
+-- (rather than being threaded through every function call) purely so the
+-- helper functions further down (place_view_scaled, etc.) can read the
+-- current paper's layout without each one needing it as a parameter.
 local DRAWING_AREA, VIEW_GAP_INCHES, TEXT_SCALE = PAPERS.archd.drawing_area, PAPERS.archd.view_gap, PAPERS.archd.text_scale	--set from the dialog before drawing
+-- top-level groups this plugin creates itself (Group Numbering's labels, Glyph Lab's test geometry) are never
+-- swept into a sheet's bounding box when drawing "the whole model"
 local SKIP_GROUPS = {["Group Numbers"] = true, ["Glyph Lab"] = true}
 --US architectural scales: inches on the sheet per foot of model -> ratio = 12 / that. Smallest drawn scale is 1/8" = 1'-0".
 local SCALES = {
@@ -28,6 +39,10 @@ local DEFAULTS = {sheet_name = "Elevations", title = "ELEVATIONS", number = "A-1
 ----------------------------------------------------------------------------------------------------------------
 -- SheetKit: the reusable part (copy this block into another plugin; `require` between plugins is untested)
 ----------------------------------------------------------------------------------------------------------------
+-- Everything under SheetKit.* is written as a self-contained namespace
+-- table deliberately, so another plugin could copy just this section and
+-- call SheetKit.elevations_sheet(...) directly, without needing PYTHA's
+-- (untested, as the comment says) plugin-to-plugin `require` mechanism.
 local SheetKit = {}
 
 function SheetKit.to_doc(value_mm)							--mm -> document units
@@ -37,6 +52,14 @@ end
 function SheetKit.in_to_doc(value_in) return SheetKit.to_doc(value_in * 25.4) end
 
 --union bounding box {{x,y,z},{x,y,z}} of the top-level groups (or of `groups` if given), skipping helper groups
+-- If `groups` is given, measures exactly those (used when the user picked
+-- specific cabinets to draw). Otherwise walks every TOP-LEVEL group in the
+-- model and grows a running min/max box to cover them all - except groups
+-- in SKIP_GROUPS, which are this plugin's own (or Glyph Lab's) helper
+-- geometry and shouldn't distort "draw the whole model".
+-- include_all overrides the skip list - used as a fallback below when the
+-- model turns out to contain ONLY skip-listed groups (so there's nothing
+-- else to measure).
 function SheetKit.model_bounds(groups, include_all)
 	local low, high, count, skipped = nil, nil, 0, 0
 	local function add_box(group)
@@ -66,6 +89,12 @@ end
 
 --place one orthographic view: centre (centre_x, centre_y) and size (width, height) in document units, clipped to the bounds box
 --axes: h_axis and v_axis are the model axis indices (1=x, 2=y, 3=z) that run horizontally / vertically in that view
+-- This is the "fit-to-size" placement mode (used when the user unticks "Set
+-- the real view scale"): PYTHA is simply told the view's crop window
+-- (view_min/view_max, straight from the model's bounding box on the two
+-- axes this view shows) and the on-sheet box to fit it into; PYTHA scales
+-- the content to fit on its own, so there's no real architectural scale
+-- associated with the result.
 function SheetKit.place_view(sheet, view, bounds, h_axis, v_axis, centre_x, centre_y, width, height, elements)
 	return pyplot.insert_detail(sheet, {
 		view = view, position = {centre_x, centre_y}, size = {width, height},
@@ -78,6 +107,14 @@ end
 --(model 0,0 on that view's axes) lands on `position`, and `size` is a crop frame centred on `position`. So to centre the
 --model's box on (centre_x, centre_y) the position is shifted by minus the box centre / scale, and the frame is enlarged to still hold it.
 --view_min/view_max are not used. (All inferred from one test model whose box started at 0,0,0: re-check on a model that does not.)
+-- This is the "real scale" placement mode (the default). Unlike place_view
+-- above, PYTHA's `scale` parameter anchors the view by the MODEL'S ORIGIN
+-- (0,0 on this view's two axes), not by the model's bounding-box centre -
+-- so to still end up with the box visually centred at (centre_x, centre_y)
+-- on the sheet, this shifts `position` by the box centre converted to sheet
+-- units (model_centre / ratio) in the opposite direction, then enlarges the
+-- crop frame (`size`) so it's still big enough to contain the whole box
+-- once it's off-centre within that frame.
 function SheetKit.place_view_scaled(sheet, view, bounds, h_axis, v_axis, centre_x, centre_y, width, height, ratio, elements)
 	local model_centre_h = (bounds[1][h_axis] + bounds[2][h_axis]) / 2
 	local model_centre_v = (bounds[1][v_axis] + bounds[2][v_axis]) / 2
@@ -96,6 +133,11 @@ function SheetKit.text(sheet, text_string, left_x, top_y, size_mm, bold)
 end
 
 --inches-per-foot text ("3/4", "1-1/2", "1", "3") -> number, or nil
+-- Parses the scale text box's free-form input into a plain number of
+-- inches-per-foot, accepting whole numbers ("3"), simple fractions ("3/4"),
+-- and mixed fractions ("1-1/2"). Also tolerates a user typing the scale the
+-- way it's usually WRITTEN on a drawing ('3/4" = 1'-0"'): quote marks and
+-- spaces are stripped, and anything from "=1" onward is discarded.
 function SheetKit.parse_inches_per_foot(text)
 	text = tostring(text or ""):gsub("[%s\"']", ""):gsub("=1.*", "")
 	if text == "" then return nil end
@@ -106,6 +148,7 @@ function SheetKit.parse_inches_per_foot(text)
 	return tonumber(text)
 end
 
+--the printable label for a scale entry, e.g. "3/4\" = 1'-0\"", or "FULL SIZE" at 1:1 or larger
 function SheetKit.scale_label(scale_entry)
 	if scale_entry.inches_per_foot >= 12 then return "FULL SIZE" end
 	return scale_entry.name .. "\" = 1'-0\""
@@ -113,6 +156,15 @@ end
 
 --auto: the largest listed scale whose views still fit (fit_ratio = largest sheet/model ratio that fits).
 --typed: the listed scale closest to what was typed. Returns scale entry and whether the views fit the drawing area.
+-- `fit_ratio` is the largest sheet-inches-per-model-inch ratio that would
+-- still let the views fit on the page (computed by the caller from the
+-- model's actual size vs. the drawing area). In AUTO mode (no scale typed),
+-- this walks the standard SCALES list from smallest to largest and keeps
+-- upgrading `want` to the biggest standard scale that's still <= fit_ratio
+-- (expressed per-foot via /12), so you get the largest clean architectural
+-- scale that still fits. In TYPED mode, it instead finds whichever standard
+-- scale is numerically closest to what the user typed (even if it doesn't
+-- fit - the second return value tells the caller that, so it can warn).
 function SheetKit.pick_scale(fit_ratio, typed_inches_per_foot)
 	local want = typed_inches_per_foot
 	if want == nil then
@@ -128,6 +180,7 @@ function SheetKit.pick_scale(fit_ratio, typed_inches_per_foot)
 	return best, best.inches_per_foot / 12 <= fit_ratio * 1.0001
 end
 
+--create a new plot sheet named `name`; if that name is taken, try "<name> 2", "<name> 3", ... up to 9; returns (sheet, name_used)
 function SheetKit.new_sheet(name)
 	local call_ok, sheet = pcall(function() return pyplot.create_sheet(name) end)
 	if call_ok then return sheet, name end
@@ -141,6 +194,13 @@ end
 
 --let the user click parts in the model and return the group(s) around them. levels: 0 = the group directly around the clicked
 --part, 1 = that group's parent group, ... (stops at the top-level group). Returns a list of group handles, nil if cancelled.
+-- pyux.select_part(true, prompt) lets the user click one or more PARTS in
+-- the model (not groups directly - you click actual geometry). For each
+-- part clicked, this walks up to find the group that should actually be
+-- drawn: first its immediate parent group, then up `levels` more parent
+-- groups if requested (e.g. click a door part, levels=1, to get the whole
+-- cabinet rather than just the door's own sub-group). Duplicate groups
+-- (two parts clicked inside the same cabinet) are only kept once.
 function SheetKit.pick_groups(levels)
 	local call_ok, selection = pcall(function() return pyux.select_part(true, pyloc "Click the cabinet(s) / group(s) to draw, then confirm") end)
 	if not call_ok then error("pyux.select_part is not available on this build: " .. tostring(selection)) end
@@ -178,6 +238,24 @@ function SheetKit.describe_group(group)
 end
 
 --the whole layout: third-angle (top above front, side to the right of front), one common scale, labels, title block
+-- THE MAIN BUILDER. Given `options` (sheet name, title, sheet number, scale
+-- text, paper preset, explicit-scale flag, and optionally a list of groups
+-- to measure), this:
+--   1. picks the paper preset and its drawing-area geometry
+--   2. measures the model (or the given groups) to get a bounding box
+--   3. works out, in real model millimetres, how wide/tall the front, top
+--      and side views need to be (front = x by z, top = x by y, side = y by z)
+--   4. computes `fit_ratio`, the largest scale that would still let a
+--      third-angle layout of those three views fit the drawing area, and
+--      picks the actual scale to use (SheetKit.pick_scale, honouring an
+--      explicit scale if one was typed)
+--   5. lays the three views out: front view centred, top view directly
+--      above it, side view directly to its right, each separated by
+--      VIEW_GAP_INCHES, and the whole arrangement centred within the
+--      drawing area
+--   6. creates the sheet, places each view (scaled or fit-to-size depending
+--      on options.explicit) with a label under it, then writes the title
+--      block text (title, sheet number, scale + date)
 function SheetKit.elevations_sheet(options)
 	local paper_preset = PAPERS[tostring(options.paper or ""):lower():gsub("[%s%-_]", "")] or PAPERS.archd
 	DRAWING_AREA, VIEW_GAP_INCHES, TEXT_SCALE = paper_preset.drawing_area, paper_preset.view_gap, paper_preset.text_scale
@@ -201,6 +279,7 @@ function SheetKit.elevations_sheet(options)
 	local inches_to_doc = SheetKit.in_to_doc
 	local sheet, used_name = SheetKit.new_sheet(options.sheet_name)
 	local placed = {}
+	-- place one view box + its label underneath, and remember the label so the final result can list which views were placed
 	local function add_view(label, view, horizontal_axis, vertical_axis, centre_x, centre_y, width, height)
 		if options.explicit then
 			SheetKit.place_view_scaled(sheet, view, bounds, horizontal_axis, vertical_axis, inches_to_doc(centre_x), inches_to_doc(centre_y), inches_to_doc(width), inches_to_doc(height), ratio, options.groups)
@@ -225,6 +304,10 @@ end
 ----------------------------------------------------------------------------------------------------------------
 -- plugin entry
 ----------------------------------------------------------------------------------------------------------------
+-- The options dialog: sheet name/title/number, an optional explicit scale,
+-- which paper preset to use, whether to draw the whole model or let the
+-- user click specific groups, and (if picking) whether picked groups share
+-- one sheet or each get their own.
 local function dialog_fn(dialog, settings)
 	dialog:set_window_title(pyloc "Sheet Kit 0.5 (beta)")
 	dialog:create_standalone_label({1, 2}, pyloc "Makes a new plot sheet with front, top and side views of the model (or the groups you pick), view labels and a title block.")
@@ -260,6 +343,18 @@ local function dialog_fn(dialog, settings)
 	dialog:equalize_column_widths({1, 2})
 end
 
+-- The plugin's entry point. Flow:
+--   1. load/show the options dialog
+--   2. if "pick groups" is on: let the user click parts, resolve them to
+--      group(s) via SheetKit.pick_groups, show a confirmation dialog
+--      listing + highlighting what was picked (so a wrong click can be
+--      caught before anything is drawn), and either keep them as one job
+--      (one shared sheet) or split into one job per group ("each" ticked)
+--   3. if not picking, there's just the one job: draw the whole model
+--   4. run SheetKit.elevations_sheet for every job, collecting results
+--   5. report what was made - a short summary for one sheet, a list of
+--      names for several, and a warning if the chosen scale doesn't
+--      actually fit the drawing area
 function sheet_kit()
 	local settings = {}
 	for key, value in pairs(DEFAULTS) do settings[key] = value end
@@ -295,6 +390,8 @@ function sheet_kit()
 		pcall(function() pyux.clear_highlights() end)
 		if answer ~= "ok" then return end
 		if settings.each and #picked > 1 then
+			-- one sheet per picked group: build a separate options-table copy for
+			-- each group, with its own groups={group} and a numbered sheet name
 			jobs = {}
 			for index, group in ipairs(picked) do
 				local job_copy = {}
@@ -304,6 +401,7 @@ function sheet_kit()
 				table.insert(jobs, job_copy)
 			end
 		else
+			-- all picked groups together on the one shared sheet
 			settings.groups = picked
 		end
 	end

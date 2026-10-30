@@ -28,11 +28,41 @@
 #     (glTF splits every part per material, duplicating seam vertices) and
 #     mark hard edges as UV seams.
 #
+#  HOW THE WHOLE FILE FITS TOGETHER (read this before the code below):
+#   1. _read_gltf / _write_glb / _tokenized_copy: glTF/GLB is just JSON (plus
+#      an optional binary blob for mesh data). PYTHA writes each node's own
+#      name into the glTF JSON, but Blender's STOCK glTF importer can rename
+#      objects on import (to dodge name collisions) and gives no reliable way
+#      to map a resulting Blender object back to the glTF node it came from.
+#      The fix used here: before handing the file to Blender's importer, make
+#      a TEMPORARY COPY where every node's name is overwritten with a unique
+#      token ("PYTHAN_0", "PYTHAN_1", ...). Blender then can't rename them
+#      into collision, and this file can match each new Blender object back
+#      to its original node by that token - and only then restore the real
+#      PYTHA name (optionally minus its layer/pen tag).
+#   2. PythaImport.run(): orchestrates the whole import - write the
+#      tokenized copy, call Blender's bpy.ops.import_scene.gltf, then walk
+#      the resulting objects and the glTF node tree together to rebuild
+#      PYTHA's group structure as nested Blender collections, restore real
+#      names, and pull out layer/pen data from the Export Tags.
+#   3. The rest of PythaImport's methods are the optional clean-up/extra
+#      steps (layer & pen collections, material library swap, vertex
+#      welding, hard-edge UV seams), each one individually toggleable from
+#      the operator's options.
+#   4. IMPORT_OT_pytha_gltf: the Blender Operator (what actually shows up
+#      under File > Import) - just wires up the options UI and calls
+#      PythaImport.
+#   5. register()/unregister() + _menu: standard Blender add-on boilerplate
+#      that adds/removes the menu entry.
+#
 #  CHANGELOG
 #  1.0.0 - first version (2026-10-06), tested against a PYTHA V26 GLB export
 #          of a BCW Kitchen Wizard kitchen.
 # ============================================================
 
+# Blender's add-on manifest: this dict is what Blender reads to show the
+# add-on in Edit > Preferences > Add-ons (name, author, minimum Blender
+# version, where its menu entry lives, and its one-line description).
 bl_info = {
     "name": "PYTHA glTF Importer",
     "author": "Brassington Caseworks",
@@ -60,11 +90,17 @@ VERBOSE = True
 
 # " {L12:Doors P3}" at the end of a part name (written by the BCW Export Tags PYTHA plugin)
 TAG_RE = re.compile(r"\s*\{L(-?\d+):(.*?) P(-?\d+)\}\s*$")
+# Matches the material name PYTHA's glTF export gives a part that has NO
+# real material assigned ("Pen 3"), so this importer can still recover its
+# pen number even when Export Tags wasn't run.
 PEN_MAT_RE = re.compile(r"^Pen (\d+)$")
+# The unique placeholder name pattern written into the tokenized glTF copy
+# (see _tokenized_copy below), e.g. "PYTHAN_0", "PYTHAN_1", ...
 TOKEN = "PYTHAN_%d"
 
 
 def _log(*args):
+    """Print a diagnostic line (visible in Blender's System Console) when VERBOSE is on."""
     if VERBOSE:
         print("[PYTHA glTF]", *args)
 
@@ -72,7 +108,14 @@ def _log(*args):
 # ── glTF / GLB reading and the temporary renamed copy ───────────────────────
 
 def _read_gltf(path):
-    """Return (json_dict, kind, bin_chunk_or_None)."""
+    """Return (json_dict, kind, bin_chunk_or_None).
+
+    A .gltf file is plain JSON on disk. A .glb (binary glTF) file is a small
+    binary header followed by one JSON "chunk" and usually one binary "BIN"
+    chunk holding the raw mesh data; this function tells the two apart by
+    the file's first 4 bytes ("glTF" magic = binary) and, for a .glb,
+    manually walks its chunk table to pull out the JSON and binary blob.
+    """
     with open(path, "rb") as f:
         head = f.read(4)
         f.seek(0)
@@ -95,6 +138,8 @@ def _read_gltf(path):
 
 
 def _write_glb(path, js, binc):
+    """Write (json_dict, binary_chunk_or_None) back out as a valid .glb file,
+    the inverse of the binary-chunk-walking half of _read_gltf above."""
     jb = json.dumps(js, separators=(",", ":")).encode("utf-8")
     jb += b" " * ((4 - len(jb) % 4) % 4)
     total = 12 + 8 + len(jb) + (8 + len(binc) if binc is not None else 0)
@@ -130,6 +175,11 @@ def _tokenized_copy(path, js, kind, binc):
 # ── import ──────────────────────────────────────────────────────────────────
 
 class PythaImport:
+    """Runs one full import: calls Blender's own glTF importer on a
+    name-tokenized copy of the file, then rebuilds PYTHA's real group tree,
+    names and layer/pen data on top of whatever Blender produced, and
+    applies whichever optional clean-up steps the user asked for."""
+
     def __init__(self, filepath, opts, report=None):
         self.filepath = filepath
         self.o = opts
@@ -139,6 +189,9 @@ class PythaImport:
         self.stats = {}
 
     def run(self, context):
+        # Step 1: read the source file and make the tokenized temp copy, so
+        # every object Blender creates can be matched back to a glTF node
+        # index regardless of how Blender renames it internally.
         js, kind, binc = _read_gltf(self.filepath)
         nodes = js.get("nodes", [])
         self.nodes = nodes
@@ -148,16 +201,23 @@ class PythaImport:
             self.report({"WARNING"}, "Not a PYTHA export (generator '%s') - importing anyway" % gen)
 
         tmp = _tokenized_copy(self.filepath, js, kind, binc)
+        # Snapshot the existing objects first, so after the import we can
+        # tell exactly which objects Blender's importer just created (rather
+        # than, say, objects already in the scene from something else).
         before = set(bpy.data.objects)
         try:
             bpy.ops.import_scene.gltf(filepath=tmp)
         finally:
+            # the tokenized copy is temporary scratch data - always clean it
+            # up, even if the import itself raised an error
             try:
                 os.remove(tmp)
             except OSError:
                 pass
         new_objs = [o for o in bpy.data.objects if o not in before]
 
+        # Match each new Blender object back to its glTF node index via the
+        # "PYTHAN_<i>" token prefix written into _tokenized_copy above.
         by_node = {}
         for ob in new_objs:
             m = re.match(r"^PYTHAN_(\d+)", ob.name)
@@ -165,18 +225,30 @@ class PythaImport:
                 by_node[int(m.group(1))] = ob
 
         # parents per node (glTF tree), roots from the scene
+        # Rebuild the glTF node hierarchy as a plain {child_index: parent_index}
+        # map by walking every node's own "children" list - glTF stores the
+        # tree top-down (parent lists children), so this just inverts it for
+        # convenient parent lookups below.
         parent = {}
         for i, n in enumerate(nodes):
             for c in n.get("children", []):
                 parent[c] = i
         scene_roots = js.get("scenes", [{}])[js.get("scene", 0)].get("nodes", [])
 
+        # One root collection per import, named "PYTHA <source file base name>",
+        # linked directly into the current scene - everything this import
+        # creates lives under this collection.
         base = os.path.splitext(os.path.basename(self.filepath))[0]
         root_col = bpy.data.collections.new("PYTHA " + base)
         context.scene.collection.children.link(root_col)
         self.root_col = root_col
 
         # collections for group nodes (nodes with children and no mesh, or with children)
+        # Lazily creates (and caches in self.groups) a Blender Collection for
+        # glTF node `i`, first recursively ensuring its PARENT's collection
+        # exists too - so PYTHA's nested group structure (Kitchen > Base >
+        # Carcass > ...) comes out as a matching nested collection tree,
+        # built top-down the first time any of its descendants needs it.
         def group_col(i):
             if i in self.groups:
                 return self.groups[i]
@@ -189,6 +261,15 @@ class PythaImport:
             return col
 
         # build parts
+        # Walk every matched (node_index, object) pair in node order and, for
+        # each MESH object (skip empties/groups - they're handled purely as
+        # collections above): detach it from whatever parenting Blender's
+        # importer gave it while preserving its world transform, recover its
+        # real PYTHA name and any layer/pen tag from the node's raw name,
+        # store that as custom properties, rename the object and its mesh
+        # data-block to the clean name, and finally move it out of
+        # whichever collection(s) Blender's importer put it in and into the
+        # correct PYTHA group collection.
         for i, ob in sorted(by_node.items()):
             n = nodes[i]
             if ob.type != "MESH":
@@ -218,6 +299,12 @@ class PythaImport:
             self.parts.append((ob, i))
 
         # pens from "Pen <n>" materials (parts without a PYTHA material)
+        # A part with no real PYTHA material still gets a pen number this
+        # way: PYTHA's own glTF export names the fallback material "Pen <n>"
+        # for such parts, so for any part that didn't already get
+        # "pytha_pen" from an Export Tags tag, check its material slots for
+        # a name matching that pattern (stripping Blender's own ".001"-style
+        # duplicate suffix first).
         for ob, _ in self.parts:
             if "pytha_pen" in ob:
                 continue
@@ -229,6 +316,11 @@ class PythaImport:
                         break
 
         # remove the empties the stock importer made for groups
+        # Blender's own glTF importer creates an Empty object for every
+        # non-mesh node (its usual way of representing a bare group/joint);
+        # since PYTHA groups are now represented as Collections instead
+        # (via group_col above), these leftover empties serve no purpose
+        # and are deleted.
         empties = [o for o in by_node.values() if o.type == "EMPTY"]
         for e in empties:
             bpy.data.objects.remove(e, do_unlink=True)
@@ -236,6 +328,8 @@ class PythaImport:
         self.stats["parts"] = len(self.parts)
         self.stats["groups"] = len(self.groups)
         self.stats["empties_removed"] = len(empties)
+        # Steps 2 onward: the optional extras, each gated behind its own
+        # checkbox in the operator's options (self.o).
         self._layer_and_pen_collections()
         if self.o.get("material_library"):
             self._swap_materials(self.o["material_library"])
@@ -247,12 +341,21 @@ class PythaImport:
 
     @staticmethod
     def _parse_tag(raw):
+        """Split a raw glTF node name into (clean_name, layer, layer_name, pen).
+        If `raw` carries no Export Tags tag (TAG_RE doesn't match), returns
+        the name unchanged with layer/pen as None."""
         m = TAG_RE.search(raw)
         if not m:
             return raw, None, None, None
         return raw[:m.start()], int(m.group(1)), m.group(2), int(m.group(3))
 
     def _layer_and_pen_collections(self):
+        """Optional extra: in addition to the group-based collection tree
+        already built in run(), also link every part that has layer/pen
+        data into a second, parallel "Layers / Layer <n>" (and, if enabled,
+        "Pens / Pen <n>") collection tree - the SAME object can belong to
+        several collections in Blender, so this doesn't move anything out
+        of its group, just adds an alternate way to browse by layer or pen."""
         tagged = [ob for ob, _ in self.parts if "pytha_layer" in ob]
         self.stats["tagged_parts"] = len(tagged)
         if tagged and self.o.get("layer_collections", True):
@@ -286,6 +389,11 @@ class PythaImport:
             _log("no layer/pen tags found - run 'Export tags' (BCW Export Tags) in PYTHA before exporting to get layers")
 
     def _swap_materials(self, lib_path):
+        """Optional extra: replace every imported material that has a
+        same-named counterpart in an external .blend "material library"
+        with that library's material (so, e.g., all your "VP-1" laminate
+        materials point at one shared, already-configured Blender material
+        instead of each import creating its own disconnected copy)."""
         lib_path = bpy.path.abspath(lib_path)
         if not os.path.isfile(lib_path):
             self.report({"WARNING"}, "Material library not found: %s" % lib_path)
@@ -298,6 +406,10 @@ class PythaImport:
         def base(n):
             # "VP-1.001" -> "VP-1" (Blender's duplicate suffix only: a dot + exactly 3 digits)
             return re.sub(r"\.\d{3}$", "", n)
+        # bpy.data.libraries.load's `with` block only DECIDES what to pull in
+        # (via the `dst.materials = [...]` assignment); the actual append
+        # happens when the block exits, which is why `loaded` below is built
+        # from `dst.materials` only after the `with` statement has finished.
         with bpy.data.libraries.load(lib_path, link=False) as (src, dst):
             lib_names = set(src.materials)
             wanted = sorted({base(m.name) for m in used} & lib_names)
@@ -309,6 +421,11 @@ class PythaImport:
             new = loaded.get(base(m.name))
             if new is not None and new is not m:
                 old_name = base(m.name)
+                # user_remap repoints every user of the old material (every
+                # part using it) at `new` in one call, then the now-unused
+                # old material is deleted and the library material renamed
+                # back to the plain name (since appending may have given it
+                # a ".001"-style suffix of its own).
                 m.user_remap(new)
                 bpy.data.materials.remove(m)
                 new.name = old_name
@@ -317,6 +434,11 @@ class PythaImport:
         _log("material library: %d of %d imported materials replaced from %s" % (swapped, len(used), lib_path))
 
     def _merge_by_distance(self, dist):
+        """Optional clean-up: glTF export splits a part into one sub-mesh per
+        material, which duplicates every vertex that sits on a material
+        seam. This welds back together any vertices within `dist` of each
+        other on every imported part, using Blender's bmesh module (loaded
+        as a temporary bmesh, not the viewport's live edit-mesh)."""
         removed = 0
         for ob, _ in self.parts:
             bm = bmesh.new()
@@ -331,6 +453,10 @@ class PythaImport:
         self.stats["verts_welded"] = removed
 
     def _mark_hard_edge_seams(self, angle_limit=math.radians(40.0)):
+        """Optional clean-up: mark any edge shared by exactly two faces whose
+        angle to each other exceeds `angle_limit` (default ~40 degrees) as a
+        UV seam - a quick way to get sensible-looking UV island boundaries
+        on box-like cabinet parts without manually seaming them."""
         n = 0
         for ob, _ in self.parts:
             bm = bmesh.new()
@@ -354,6 +480,9 @@ class IMPORT_OT_pytha_gltf(Operator, ImportHelper):
     filename_ext = ".glb"
     filter_glob: StringProperty(default="*.glb;*.gltf", options={"HIDDEN"})
 
+    # Each of these becomes one checkbox/field in the file-browser's import
+    # options panel (drawn by draw() below); their defaults are what a
+    # first-time import gets without changing anything.
     layer_collections: BoolProperty(
         name="Layer Collections",
         description="Also link every tagged part into 'Layers / Layer <n>' collections (needs BCW Export Tags in PYTHA before export)",
@@ -378,6 +507,10 @@ class IMPORT_OT_pytha_gltf(Operator, ImportHelper):
         default=True)
 
     def execute(self, context):
+        """Blender calls this when the user confirms the import dialog.
+        Builds a PythaImport with the chosen options, runs it, and reports
+        a one-line summary (or the error, if it failed) in Blender's status
+        bar / info log."""
         import time
         t0 = time.perf_counter()
         try:
@@ -408,6 +541,8 @@ class IMPORT_OT_pytha_gltf(Operator, ImportHelper):
         return {"FINISHED"}
 
     def draw(self, context):
+        """Draws the options panel shown in Blender's file browser sidebar
+        while picking a file to import (one row per property above)."""
         layout = self.layout
         layout.prop(self, "layer_collections")
         layout.prop(self, "pen_collections")
@@ -420,15 +555,18 @@ class IMPORT_OT_pytha_gltf(Operator, ImportHelper):
 
 
 def _menu(self, context):
+    """Appended to File > Import to add the "PYTHA (.glb/.gltf)" menu entry."""
     self.layout.operator(IMPORT_OT_pytha_gltf.bl_idname, text="PYTHA (.glb/.gltf)")
 
 
 def register():
+    """Standard Blender add-on hook: called when the add-on is enabled."""
     bpy.utils.register_class(IMPORT_OT_pytha_gltf)
     bpy.types.TOPBAR_MT_file_import.append(_menu)
 
 
 def unregister():
+    """Standard Blender add-on hook: called when the add-on is disabled."""
     bpy.types.TOPBAR_MT_file_import.remove(_menu)
     bpy.utils.unregister_class(IMPORT_OT_pytha_gltf)
 
